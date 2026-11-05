@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to the same branch makes the first run pointless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # saint targets macOS on Apple silicon and nothing else, so it is checked
+    # there. The test suite itself needs no Apple `container` runtime: the
+    # sandbox layer is exercised through a recorded fake, and the keychain
+    # wrapper stubs the process it would otherwise run.
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # Read the version from go.mod so the toolchain cannot drift away
+          # from what the module declares.
+          go-version-file: go.mod
+          cache: true
+
+      # gofmt, go vet, and the race-enabled test suite. The same command the
+      # contributing instructions tell a developer to run before claiming
+      # something works, so CI cannot disagree with the documentation.
+      - run: make check
+
+      - run: make build

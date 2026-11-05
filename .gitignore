@@ -1,0 +1,62 @@
+# Build output
+/saint
+/dist/
+
+# macOS
+.DS_Store
+
+# Go test and coverage artifacts
+*.test
+*.out
+coverage.*
+
+# The developer's own tooling, not the project's.
+#
+# These describe one person's setup - which agent plugins they run, which
+# commands they have permitted locally - and say nothing about how to build or
+# use saint. Anyone cloning this repo brings their own.
+#
+# CLAUDE.md at the root is not covered by this and is deliberately tracked: it
+# is instructions for working on saint, not configuration for one machine.
+.claude/
+.codex/
+.cursor/
+# Inputs and state for the Impeccable design tool: its product brief, design
+# spec and generated tokens. The palette saint actually renders lives in
+# internal/tui/palette.go.
+.impeccable/
+/PRODUCT.md
+/DESIGN.md
+.aider*
+.idea/
+.vscode/
+*.local.json
+
+# saint's own runtime state.
+#
+# None of this belongs in a checkout, and all of it is machine-local by
+# definition: the state directory records real session IDs and mount paths off
+# the developer's filesystem, the journal records every request a guest made,
+# and a transcript is a raw dump of an agent's terminal - which is whatever the
+# agent was working on. These are listed even though saint writes them under
+# ~/.saint, because a redirected home or a test run in the wrong directory is
+# exactly the accident this file exists to survive.
+/.saint/
+/saint.log
+/proxy.jsonl
+/proxy.jsonl.*
+/transcript.log
+/sessions/
+/tokens/
+
+# Secrets.
+#
+# saint hands a subscription token to a container through a 0600 env file, and
+# writes it to a host temp directory rather than anywhere near the repo. This is
+# the second line, not the first: no credential should ever be written here, and
+# if one is, it must not become a commit.
+.env
+.env.*
+*.env
+*.pem
+*.key
