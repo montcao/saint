@@ -226,6 +226,11 @@ func checkIndex(root string, mdFiles []string, now time.Time) []problem {
 	}
 	listed := map[string]bool{}
 	for i, line := range lines {
+		// Only table rows list documents; a link in the index's own prose
+		// is not an entry and needs no review date.
+		if !strings.HasPrefix(strings.TrimSpace(line), "|") {
+			continue
+		}
 		for _, m := range mdLink.FindAllStringSubmatch(line, -1) {
 			target, _, _ := strings.Cut(m[1], "#")
 			if strings.Contains(target, "://") || !strings.HasSuffix(target, ".md") {
