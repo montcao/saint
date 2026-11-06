@@ -7,7 +7,7 @@ FIREWALL := /usr/libexec/ApplicationFirewall/socketfilterfw
 # One pinned commitlint for hooks, CI and people, reading commitlint.config.mjs.
 COMMITLINT := npx --yes -p @commitlint/cli@21.2.4 commitlint
 
-.PHONY: all build install uninstall run test vet fmt fmt-check check hooks commitlint-msg commitlint-range allow-firewall clean
+.PHONY: all build install uninstall run test vet fmt fmt-check check docs-check hooks commitlint-msg commitlint-range allow-firewall clean
 
 all: build
 
@@ -43,6 +43,10 @@ fmt-check:
 	if [ -n "$$out" ]; then echo "$$out"; echo "run: make fmt"; exit 1; fi
 
 check: fmt-check vet test
+
+# Fail on documents that point at files, targets or documents that do not exist.
+docs-check:
+	go run ./scripts/docs-check
 
 # Use the hooks in .githooks for this clone only: commit-msg runs commitlint,
 # pre-push runs the fast checks. Undo with `git config --unset core.hooksPath`.

@@ -1,0 +1,27 @@
+name: docs
+
+# Documents that point at missing files, make targets or documents fail here.
+# The weekly run catches index entries whose review date has expired, which
+# can happen without anyone pushing.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  docs-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - run: make docs-check

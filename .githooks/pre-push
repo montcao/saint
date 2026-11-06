@@ -1,7 +1,7 @@
 #!/bin/sh
 # Runs the fast checks before a push: commitlint on each new commit, then
-# gofmt, vet and the structural tests on the working tree. The full
-# race-enabled suite runs in CI. Installed per clone by `make hooks`.
+# gofmt, vet, the docs check and the structural tests on the working tree. The
+# full race-enabled suite runs in CI. Installed per clone by `make hooks`.
 set -eu
 
 zero=0000000000000000000000000000000000000000
@@ -20,5 +20,5 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 	fi
 done
 
-make --no-print-directory -s fmt-check vet
+make --no-print-directory -s fmt-check vet docs-check
 go test -count=1 ./internal/archtest
