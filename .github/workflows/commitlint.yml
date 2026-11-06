@@ -1,0 +1,36 @@
+name: commitlint
+
+# Squash merges make the pull request title the commit on main, so the title
+# is linted as well as the commits. `edited` re-runs this when the title
+# changes without re-running the macOS build in ci.yml.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  commitlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Lint commits
+        run: make commitlint-range FROM="$BASE" TO="$HEAD"
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+
+      # The title arrives through the environment, never interpolated into the
+      # script, so a title containing shell syntax is only ever text.
+      - name: Lint pull request title
+        run: printf '%s\n' "$TITLE" | npx --yes -p @commitlint/cli@21.2.4 commitlint
+        env:
+          TITLE: ${{ github.event.pull_request.title }}

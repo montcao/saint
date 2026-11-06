@@ -1,0 +1,4 @@
+#!/bin/sh
+# Lints the commit message against commitlint.config.mjs (see AGENTS.md).
+# Installed per clone by `make hooks`.
+exec make --no-print-directory -s commitlint-msg MSG="$1"

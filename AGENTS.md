@@ -49,9 +49,10 @@ how that work reaches `main`.
   for. If the technical reason cannot be stated without it, state the technical
   reason only. These texts are public and permanent; a decision the owner has
   not announced must not be announced by a commit.
-- **Lint before committing.** `echo "<message>" | npx commitlint`, which reads
-  `commitlint.config.mjs`. Do the same for the pull request title, because
-  squash-merge makes it the commit on `main`.
+- **Lint before committing.** `make commitlint-msg MSG=<file>` (or
+  `echo "<message>" | npx commitlint`), which reads `commitlint.config.mjs`. Do
+  the same for the pull request title, because squash-merge makes it the commit
+  on `main`; CI lints both.
 - **Never bare `git stash`.** The stash is shared across worktrees. Use a
   temporary WIP commit, or `git stash create` and `git stash apply <sha>` by
   SHA.
@@ -61,10 +62,10 @@ how that work reaches `main`.
 - **Run what your change touches**: its test file, the formatter on changed
   files, and `make check` (it is fast here). CI runs it again on macOS. Push,
   then read the checks.
-- **Hooks:** a `commit-msg` hook runs commitlint and a `pre-push` hook runs the
-  fast offline checks, where installed. Use `--no-verify` only when deliberate,
-  and say why (for example, the hook misreads a force-push range that passes
-  commit by commit).
+- **Hooks:** `make hooks` installs `.githooks` for your clone: `commit-msg` runs
+  commitlint, `pre-push` lints the new commits and runs gofmt, vet and the
+  structural tests. Use `--no-verify` only when deliberate, and say why (for
+  example, the hook misreads a force-push range that passes commit by commit).
 - **Force-push only** your own branch, or one you were asked to change, and
   only with a full-SHA lease:
   `git push --force-with-lease="refs/heads/<branch>:<full sha you last saw>"`.
