@@ -1,6 +1,7 @@
 // Package archtest holds structural tests: rules about the shape of the code
-// that CLAUDE.md and package comments state in prose, checked so that breaking
-// one fails `make check` instead of waiting for a reviewer to remember it.
+// that docs/design/principles.md, ARCHITECTURE.md and package comments state in
+// prose, checked so that breaking one fails `make check` instead of waiting for
+// a reviewer to remember it.
 //
 // Each failure names the file and line and says what to do instead.
 package archtest
@@ -150,8 +151,8 @@ func TestPackageBoundaries(t *testing.T) {
 }
 
 // maxLines is the most a Go file may hold. Files already past it are held at
-// their current length so they can shrink but not grow; splitting them is an
-// open item. Lower an entry when a file shrinks.
+// their current length so they can shrink but not grow; splitting them is
+// tracked in docs/plans/tech-debt.md. Lower an entry when a file shrinks.
 const maxLines = 800
 
 var grandfathered = map[string]int{
@@ -213,7 +214,7 @@ var (
 	privateIP = regexp.MustCompile(`\b(10\.\d{1,3}|192\.168|172\.(1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}\b`)
 )
 
-// Nothing machine-local in code or tests (CLAUDE.md). No file may name a real
+// Nothing machine-local in code or tests (docs/design/principles.md). No file may name a real
 // home directory, in code or in a comment; tests may use the fake home
 // /Users/tester. Production code may hold no private-network address in a
 // string literal, because those are discovered at runtime. Comments may cite

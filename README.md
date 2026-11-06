@@ -380,9 +380,11 @@ more than style:
 - **Nothing machine-local in code or tests.** No absolute home paths, no
   discovered IP addresses, no exact host versions as gates.
 
-[`CLAUDE.md`](CLAUDE.md) has the longer version, `AGENTS.md` the rules for
-commits and pull requests, and [`SPIKES.md`](SPIKES.md) what was measured on
-real hardware rather than assumed.
+[`AGENTS.md`](AGENTS.md) is the map for contributors and agents: the
+commands, every rule in one line, and where each is written in full.
+[`ARCHITECTURE.md`](ARCHITECTURE.md) says which package owns what, and
+[`SPIKES.md`](SPIKES.md) what was measured on real hardware rather than
+assumed.
 
 ## Security
 

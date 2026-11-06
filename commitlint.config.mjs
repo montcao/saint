@@ -1,4 +1,4 @@
-// Commit message rules from AGENTS.md, checked with `npx commitlint`.
+// Commit message rules from docs/operations/workflow.md, checked with `npx commitlint`.
 //
 // Self-contained rather than extending @commitlint/config-conventional, so the
 // check needs no package.json in a Go repository. The one deliberate departure
