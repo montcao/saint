@@ -8,7 +8,7 @@ package tui
 // .gitattributes assigns. saint's 3s refresh ran `git status` on the host, so an
 // agent that wrote two lines into .git/config had a command running as the user,
 // outside the sandbox, within seconds and with nobody touching anything. That
-// was measured, not inferred; see SPIKES.md.
+// was measured, not inferred; see docs/research/spikes.md.
 //
 // Denylisting the dangerous keys does not work. Filter drivers are named by the
 // attacker, [include] pulls configuration from any file, and the list of keys

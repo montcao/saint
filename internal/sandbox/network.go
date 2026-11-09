@@ -24,8 +24,7 @@ type networkEntry struct {
 //
 // This is discovered, never hardcoded. The address is a property of the user's
 // container runtime - a different machine, or a second network, gets a different
-// subnet - so writing one down would work on exactly one host. SPIKES.md records
-// 192.168.64.1 as an observation from one machine, not as a constant.
+// subnet - so writing one down would work on exactly one host.
 //
 // It matters because a guest cannot reach the host on loopback: bridging host
 // loopback into a container needs `container system dns create ... --localhost`,

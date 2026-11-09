@@ -51,7 +51,7 @@ rather than a vulnerability:
 - **Guest egress proxying is not, on its own, egress control.** The environment
   variables are advisory: a static binary, a non-HTTP protocol, or a guest that
   unsets them all leave unobserved. Enforcement requires putting sessions on a
-  network with no other route out, which is designed and measured in `SPIKES.md`
+  network with no other route out, which is designed and measured in `docs/research/spikes.md`
   but not yet built.
 - **Subscription mode puts a real credential inside the guest.** This is
   inherent, not a defect: a gateway credential replaces the subscription and
@@ -62,7 +62,7 @@ rather than a vulnerability:
   prompts.** Sessions created with permissions skipped are behaving as
   documented.
 - Sessions sharing a container network can reach each other. Measured, recorded
-  in `SPIKES.md`, and not yet addressed.
+  in `docs/research/spikes.md`, and not yet addressed.
 
 ## Handling of secrets in this repository
 

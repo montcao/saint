@@ -41,7 +41,7 @@ confident wrong number is worse than a gap.
 The forward proxy can record every host a session reaches, but it is off by
 default, and the environment variables that point a guest at it are advisory: a
 static binary, a non-HTTP protocol, or a guest that unsets them all leave
-unobserved. Enforcement is designed and measured in [`SPIKES.md`](SPIKES.md) but
+unobserved. Enforcement is designed and measured in [`docs/research/spikes.md`](docs/research/spikes.md) but
 **not built**.
 
 saint does not inspect TLS: for forward-proxied traffic it sees hostnames and
@@ -383,7 +383,7 @@ more than style:
 [`AGENTS.md`](AGENTS.md) is the map for contributors and agents: the
 commands, every rule in one line, and where each is written in full.
 [`ARCHITECTURE.md`](ARCHITECTURE.md) says which package owns what, and
-[`SPIKES.md`](SPIKES.md) what was measured on real hardware rather than
+[`docs/research/spikes.md`](docs/research/spikes.md) what was measured rather than
 assumed.
 
 ## Security

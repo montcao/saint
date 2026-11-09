@@ -21,7 +21,7 @@ marked *checked* fail `make check` when broken (`internal/archtest`).
 | `internal/archtest` | structural tests for the boundaries below |
 | `scripts/docs-check` | `make docs-check`: documents that point at files, targets or documents that do not exist |
 
-`SPIKES.md` records what was measured on real hardware rather than assumed.
+`docs/research/spikes.md` records what was measured rather than assumed, and on which runtime.
 When a runtime behaviour surprises you, measure it and add a section.
 `docs/design/` holds design notes that are proposals, not decisions.
 

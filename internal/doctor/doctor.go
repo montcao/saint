@@ -316,10 +316,9 @@ func (d *Doctor) proxyResults(ctx context.Context, cfg store.Config, cfgErr erro
 // That second case is easy to miss and hard to diagnose: the proxy binds the
 // bridge gateway successfully and lsof shows it LISTENing, but every connection
 // times out, because the firewall blocks inbound connections to non-loopback
-// interfaces for binaries it has not been told to allow. SPIKES.md ("First
-// runtime checks") recorded host reachability as verified using `python3 -m
-// http.server` - but /usr/bin/python3 is already in the firewall allowlist, so
-// that result did not generalize to saint.
+// interfaces for binaries it has not been told to allow. A probe with `python3 -m
+// http.server` does not show this, because /usr/bin/python3 is usually already
+// in the firewall allowlist (docs/research/spikes.md).
 func proxyReachableResult(addr string) Result {
 	const name = "proxy reachable"
 

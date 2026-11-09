@@ -16,12 +16,12 @@ nothing about whether the document is still true.
 | [`ARCHITECTURE.md`](../ARCHITECTURE.md) | architecture | which package owns which answer, and the boundaries between them | Reviewed: 2026-11-06 edited |
 | [`README.md`](../README.md) | user guide | what saint does and does not do, install, keys, configuration | Reviewed: 2026-11-05 edited |
 | [`SECURITY.md`](../SECURITY.md) | security | how to report a vulnerability; which boundaries saint claims | Reviewed: 2026-11-05 edited |
-| [`SPIKES.md`](../SPIKES.md) | research | runtime behaviour measured on real hardware | Reviewed: 2026-11-05 edited |
 | [`docs/design/principles.md`](design/principles.md) | design | what saint is for and the rules that follow from it | Reviewed: 2026-11-06 edited |
 | [`docs/design/persistent-memory.md`](design/persistent-memory.md) | design proposal | nothing yet; a proposal for memory across sessions | Reviewed: 2026-11-05 edited |
 | [`docs/design/skills-injection.md`](design/skills-injection.md) | design proposal | nothing yet; a proposal for mounting skills into sessions | Reviewed: 2026-11-05 edited |
 | [`docs/operations/workflow.md`](operations/workflow.md) | operations | commits, branches, pull requests, merging, reporting | Reviewed: 2026-11-06 edited |
 | [`docs/research/gotchas.md`](research/gotchas.md) | research | traps in the terminal emulator and tests that cost real time | Reviewed: 2026-11-06 edited |
+| [`docs/research/spikes.md`](research/spikes.md) | research | runtime behaviour measured rather than assumed, and on which runtime | Reviewed: 2026-11-09 edited |
 | [`docs/plans/tech-debt.md`](plans/tech-debt.md) | plan | known gaps, what would close each, and which need a decision | Reviewed: 2026-11-06 edited |
 | [`docs/agents/reviewer.md`](agents/reviewer.md) | agent prompt | how an agent reviews a branch against these rules | Reviewed: 2026-11-06 edited |
 | [`docs/agents/doc-gardener.md`](agents/doc-gardener.md) | agent prompt | how an agent checks documents against the code | Reviewed: 2026-11-06 edited |

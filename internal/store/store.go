@@ -229,7 +229,7 @@ const (
 	// ProxyBindAuto binds the proxy to the container bridge gateway discovered
 	// at runtime. This is the default because it is the only address a guest can
 	// actually reach: bridging host loopback into a container requires admin
-	// privileges (SPIKES.md, "First runtime checks").
+	// privileges (docs/research/spikes.md).
 	//
 	// It does widen the proxy's reach to every container on that bridge, not just
 	// saint's. The per-session token is what stands between those containers and
