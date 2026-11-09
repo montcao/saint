@@ -59,61 +59,17 @@ func goFiles(t *testing.T, root string) []string {
 	return files
 }
 
-// The palette is the only file that names a colour. Everywhere else refers to
-// its col* constants, which is what keeps "one colour, one meaning" true: a
-// literal elsewhere is a colour nobody reviewed against the rest.
-func TestOnlyThePaletteNamesAColour(t *testing.T) {
-	root := repoRoot(t)
-	const palette = "internal/tui/palette.go"
-	fset := token.NewFileSet()
-
-	for _, rel := range goFiles(t, root) {
-		if rel == palette || strings.HasSuffix(rel, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(filepath.Join(root, rel))
-		if err != nil {
-			t.Fatal(err)
-		}
-		// Parsed under the relative name so failures name the file the
-		// same way on every machine.
-		file, err := parser.ParseFile(fset, rel, src, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", rel, err)
-		}
-		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok || len(call.Args) == 0 {
-				return true
-			}
-			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok || sel.Sel.Name != "Color" {
-				return true
-			}
-			if pkg, ok := sel.X.(*ast.Ident); !ok || pkg.Name != "lipgloss" {
-				return true
-			}
-			if lit, ok := call.Args[0].(*ast.BasicLit); ok && lit.Kind == token.STRING {
-				t.Errorf("%s: lipgloss.Color(%s) names a colour outside %s; add a col* constant there and use it",
-					fset.Position(lit.Pos()), lit.Value, palette)
-			}
-			return true
-		})
-	}
-}
-
 // importRules are the package boundaries the code states. The egress package
-// exists so the proxy and the interface never import each other: the proxy
-// takes a function and knows nothing about a terminal, the interface takes a
-// queue and knows nothing about sockets (internal/egress/prompt.go).
+// exists so the proxy never imports whatever answers its questions: the proxy
+// takes a function and knows nothing about a terminal, the answering side takes
+// a queue and knows nothing about sockets (internal/egress/prompt.go).
 var importRules = []struct {
 	pkg       string
 	forbidden []string
 	instead   string
 }{
-	{"internal/egress", []string{"internal/proxy", "internal/tui"}, "egress carries questions between them and must depend on neither"},
-	{"internal/proxy", []string{"internal/tui", "internal/egress"}, "take a function (see proxy.ForwardConfig.Ask) instead of importing the side that answers"},
-	{"internal/tui", []string{"internal/proxy"}, "consume proxy data through internal/usage or a queue such as internal/egress"},
+	{"internal/egress", []string{"internal/proxy"}, "egress carries questions from the proxy and must not depend on it"},
+	{"internal/proxy", []string{"internal/egress"}, "take a function (see proxy.ForwardConfig.Ask) instead of importing the side that answers"},
 }
 
 func TestPackageBoundaries(t *testing.T) {
@@ -156,12 +112,10 @@ func TestPackageBoundaries(t *testing.T) {
 const maxLines = 800
 
 var grandfathered = map[string]int{
-	"internal/tui/model.go":          1859,
 	"internal/proxy/forward.go":      1195,
 	"internal/proxy/forward_test.go": 1053,
 	"internal/session/service.go":    900,
 	"internal/store/store.go":        918,
-	"internal/tui/rail.go":           819,
 }
 
 func TestFilesDoNotGrowPastTheLimit(t *testing.T) {

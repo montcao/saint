@@ -300,7 +300,7 @@ func TestJournalConcurrentWriters(t *testing.T) {
 	}
 }
 
-// Recording after Close must be a no-op rather than a panic. The TUI closes the
+// Recording after Close must be a no-op rather than a panic. The proxy closes the
 // journal after the server, and an in-flight response can still fire a callback.
 func TestJournalRecordAfterCloseIsSafe(t *testing.T) {
 	t.Parallel()

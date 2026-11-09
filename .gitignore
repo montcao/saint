@@ -22,8 +22,7 @@ coverage.*
 .codex/
 .cursor/
 # Inputs and state for the Impeccable design tool: its product brief, design
-# spec and generated tokens. The palette saint actually renders lives in
-# internal/tui/palette.go.
+# spec and generated tokens.
 .impeccable/
 /PRODUCT.md
 /DESIGN.md

@@ -340,7 +340,7 @@ func proxyReachableResult(addr string) Result {
 		Name:   name,
 		OK:     false,
 		Detail: addr,
-		Fix:    "start saint (the TUI runs the proxy) or run: saint proxy",
+		Fix:    "open a saint pane in herdr, or run: saint proxy",
 	}
 }
 

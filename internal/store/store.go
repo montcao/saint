@@ -265,7 +265,7 @@ const (
 	// Auto is the default because the two ways of guessing wrong are not
 	// symmetric: defaulting to a subscription that is not wanted costs plan
 	// limits, while defaulting to an API key that is not wanted costs money. The
-	// resolved mode is shown in the TUI header and by saint doctor, so auto is
+	// resolved mode is shown by saint auth and saint doctor, so auto is
 	// never silent about which account is paying.
 	ProxyAuthAuto = "auto"
 
@@ -397,7 +397,7 @@ func (c Config) ProxyAuthOrDefault() string {
 
 // ResolveProxyAuth reports which mode new Claude sessions will use, and why.
 //
-// One rule, in one place. It previously lived in three - the TUI, the auth
+// One rule, in one place. It previously lived in three - the old TUI, the auth
 // command and doctor - and a change to which credentials count as a
 // subscription was applied to two of them, so the same machine reported
 // "subscription" and "api key" depending on which screen you asked.

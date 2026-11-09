@@ -52,7 +52,7 @@ const (
 
 	// journalCloseTimeout bounds shutdown. The writer only touches local files,
 	// so this should never expire - but a quit path that can hang is the worst
-	// failure this codebase ships, and that includes quitting the TUI.
+	// failure this codebase ships, and that includes stopping the proxy.
 	journalCloseTimeout = 2 * time.Second
 
 	// journalMaxTextBytes caps any single value that came from a guest. A guest

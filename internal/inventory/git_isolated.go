@@ -1,4 +1,4 @@
-package tui
+package inventory
 
 // Running git on the host against a repository a guest can write.
 //

@@ -7,17 +7,17 @@ marked *checked* fail `make check` when broken (`internal/archtest`).
 
 | Package | Owns |
 |---|---|
-| `internal/tui` | the Bubble Tea UI; `layout.go` owns how columns are divided, `palette.go` is the only file naming a colour |
+| `internal/inventory` | `saint ls`: which sessions exist, their state, and files in their repositories to review |
 | `internal/proxy` | the credential boundary and usage metering |
 | `internal/session` | session lifecycle and what a guest may mount |
 | `internal/sandbox` | the Apple `container` CLI |
 | `internal/credential` | where secrets come from: keychain, 1Password, command |
 | `internal/store` | JSON state under `~/.saint` |
 | `internal/usage` | token accounting and context windows |
-| `internal/egress` | carrying "may this session reach this host?" from the proxy to the interface, so neither imports the other |
+| `internal/egress` | carrying "may this session reach this host?" from the proxy to whatever answers it, so the proxy imports neither; nothing answers yet |
 | `internal/keychain` | the macOS `security(1)` CLI; secrets go to it on stdin, never in argv |
 | `internal/doctor` | `saint doctor`: checks of the host, the runtime, credentials and the proxy, with a fix where one is a command |
-| `cmd/saint` | the binary: CLI entry points, wiring, the proxy's lifecycle inside the TUI process, and the herdr plugin's action and pane entrypoints (`herdr.go`, with the manifest in `herdr-plugin.toml`) |
+| `cmd/saint` | the binary: CLI entry points, wiring, starting the proxy on demand, and the herdr plugin's action and pane entrypoints (`herdr.go`, with the manifest in `herdr-plugin.toml`) |
 | `internal/archtest` | structural tests for the boundaries below |
 | `scripts/docs-check` | `make docs-check`: documents that point at files, targets or documents that do not exist |
 
@@ -27,12 +27,10 @@ When a runtime behaviour surprises you, measure it and add a section.
 
 ## Boundaries
 
-- **The proxy and the interface never import each other.** `internal/egress`
-  carries questions between them: the proxy takes a function, the interface
-  takes a queue. `egress` imports neither `proxy` nor `tui`; `proxy` imports
-  neither `tui` nor `egress`; `tui` does not import `proxy` directly. *Checked.*
-- **One file names a colour.** Only `internal/tui/palette.go` passes a literal
-  to `lipgloss.Color`; everything else uses its `col*` constants. *Checked.*
+- **The proxy never imports what answers its questions.** `internal/egress`
+  carries them: the proxy takes a function, the answering side takes a queue.
+  `egress` does not import `proxy`, and `proxy` does not import `egress`.
+  *Checked.*
 - **Nothing machine-local.** No real home directory in any file, and no
   private-network address in a production string literal; both are discovered
   at runtime. *Checked.*
@@ -41,7 +39,7 @@ When a runtime behaviour surprises you, measure it and add a section.
   `docs/plans/tech-debt.md`.
 - **Host-side git never reads a mounted repository's configuration.** A guest
   can write `.git/` in every mount, so the repository inspection runs git
-  against a throwaway git directory (`internal/tui/git_isolated.go`). Covered
+  against a throwaway git directory (`internal/inventory/git_isolated.go`). Covered
   by regression tests that plant `core.fsmonitor`, a filter and an `[include]`.
 - **The sandbox layer stays behind an interface.** `internal/sandbox` runs every
   `container` command that changes state. `internal/doctor` also calls the CLI,

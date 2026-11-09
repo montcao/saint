@@ -26,8 +26,6 @@ Full text: [`docs/design/principles.md`](docs/design/principles.md).
 - **Nothing machine-local in code or tests.** Discover at runtime, compare minimums, use `t.TempDir()`.
 - **State blast radius in the UI, not just in docs.**
 - **Authenticate once per install, never per session.**
-- **One colour, one meaning.** `internal/tui/palette.go` is the only file that names a colour.
-- **Stillness is the default.** Nothing moves unless a session is working.
 - **Say which measurement a number is.**
 - **Every quit path must work.**
 

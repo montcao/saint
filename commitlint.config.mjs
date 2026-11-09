@@ -5,6 +5,16 @@
 // from the conventional preset: a body is one unwrapped paragraph, so body
 // line length is not limited.
 export default {
+  // The default parser does not accept `type(scope)!: subject`, the form
+  // docs/operations/workflow.md documents for a breaking change.
+  parserPreset: {
+    parserOpts: {
+      headerPattern: /^(\w*)(?:\(([\w$.\-* ]*)\))?!?: (.*)$/,
+      breakingHeaderPattern: /^(\w*)(?:\(([\w$.\-* ]*)\))?!: (.*)$/,
+      headerCorrespondence: ['type', 'scope', 'subject'],
+      noteKeywords: ['BREAKING CHANGE', 'BREAKING-CHANGE'],
+    },
+  },
   rules: {
     'header-max-length': [2, 'always', 72],
     'type-empty': [2, 'never'],
@@ -18,7 +28,7 @@ export default {
     'scope-enum': [
       2,
       'always',
-      ['tui', 'proxy', 'session', 'sandbox', 'credential', 'store', 'usage', 'egress', 'tiling', 'doctor', 'keychain', 'cli'],
+      ['herdr', 'inventory', 'proxy', 'session', 'sandbox', 'credential', 'store', 'usage', 'egress', 'doctor', 'keychain', 'cli'],
     ],
     'subject-empty': [2, 'never'],
     'subject-case': [2, 'always', 'lower-case'],

@@ -172,7 +172,7 @@ from that call, with no user action:
 `-c core.fsmonitor=false` blocks the first and not the second, so a denylist is
 not a fix.
 
-The fix (`internal/tui/git_isolated.go`) runs git against a throwaway git
+The fix (`internal/inventory/git_isolated.go`) runs git against a throwaway git
 directory. It holds:
 - a config saint writes;
 - a validated copy of HEAD;

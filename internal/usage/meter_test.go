@@ -148,7 +148,7 @@ func TestForgetDropsASession(t *testing.T) {
 	}
 }
 
-// The TUI renders from a snapshot without holding the lock, so the snapshot has
+// A reader works from a snapshot without holding the lock, so the snapshot has
 // to be a copy.
 func TestSnapshotIsACopy(t *testing.T) {
 	t.Parallel()
@@ -197,7 +197,7 @@ func TestNilMeterIsSafe(t *testing.T) {
 	}
 }
 
-// Record runs on the proxy's response goroutines while the TUI snapshots.
+// Record runs on the proxy's response goroutines while a reader snapshots.
 func TestMeterUnderConcurrentUse(t *testing.T) {
 	t.Parallel()
 
@@ -239,7 +239,7 @@ func TestMeterUnderConcurrentUse(t *testing.T) {
 }
 
 // The only honest "working" signal saint has is a request crossing the proxy,
-// so Begin has to be visible in the snapshot the TUI renders from - and has to
+// so Begin has to be visible in the snapshot a reader works from - and has to
 // come back to zero when the request ends.
 func TestBeginTracksInFlightThroughSnapshot(t *testing.T) {
 	t.Parallel()
@@ -350,7 +350,7 @@ func TestNilMeterBeginIsSafe(t *testing.T) {
 }
 
 // Begin runs on the proxy's serving goroutines, several sessions at a time,
-// while the TUI snapshots. The count has to land back on exactly zero: this is
+// while a reader snapshots. The count has to land back on exactly zero: this is
 // the test that would catch a lost decrement, which presents as a session that
 // says working forever.
 func TestInFlightUnderConcurrentUse(t *testing.T) {

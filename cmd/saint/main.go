@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -18,17 +19,16 @@ import (
 	"syscall"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"golang.org/x/term"
 
 	"github.com/montcao/saint/internal/credential"
 	"github.com/montcao/saint/internal/doctor"
+	"github.com/montcao/saint/internal/inventory"
 	"github.com/montcao/saint/internal/keychain"
 	"github.com/montcao/saint/internal/proxy"
 	"github.com/montcao/saint/internal/sandbox"
 	"github.com/montcao/saint/internal/session"
 	"github.com/montcao/saint/internal/store"
-	"github.com/montcao/saint/internal/tui"
 	"github.com/montcao/saint/internal/usage"
 )
 
@@ -91,24 +91,16 @@ func run(ctx context.Context, args []string) error {
 
 	sb := sandbox.NewAppleContainer(containerPath, logger.Printf)
 	kc := keychain.New(systemSecurityPath, logger.Printf)
-	inspector := tui.NewRepoInspector(gitPath, logger.Printf)
+	inspector := inventory.NewRepoInspector(gitPath, logger.Printf)
 	// Sessions created before tokens moved out of the mounted session directory
 	// still keep theirs in the old place, where the proxy no longer looks. A
-	// failure here is not fatal - it costs those sessions API access, not the
-	// whole TUI - but it must be visible.
+	// failure here is not fatal - it costs those sessions API access, not
+	// every command - but it must be visible.
 	if err := st.MigrateProxyTokens(); err != nil {
 		logger.Printf("proxy token migration failed: %v", err)
 	}
 
-	// One meter is shared between the proxy that observes the traffic and the
-	// TUI that renders it. Totals live only as long as this process, which is
-	// also as long as the proxy that produces them.
-	meter := usage.NewMeter()
-	// The loader gets the meter only once a proxy in this process is actually
-	// serving, below. A meter nothing feeds reads zero for everything, and a
-	// zero that is rendered as a measurement - every session "idle", every
-	// total nil - is a wrong answer rather than a gap.
-	loader := &tui.SnapshotLoader{Store: st, Sandbox: sb, Inspector: inspector}
+	loader := &inventory.Loader{Store: st, Sandbox: sb, Inspector: inspector}
 	workdir, err := os.Getwd()
 	if err != nil {
 		return err
@@ -123,33 +115,21 @@ func run(ctx context.Context, args []string) error {
 		return sessionCredential(st, kc, spec)
 	}
 
-	// Point new sessions at the proxy. Without this the whole proxy is inert:
-	// applecontainer.Create gates every ANTHROPIC_BASE_URL / ANTHROPIC_API_KEY
-	// env var on a non-empty proxy URL, so an unset ProxyURL means containers
-	// talk to api.anthropic.com directly with whatever credentials they find.
-	guestURL, proxyErr := guestProxyURL(ctx, st, containerPath)
-	svc.ProxyURL = guestURL
-
-	if len(args) == 0 {
-		// The proxy runs inside the TUI process so `saint` works with no second
-		// terminal. It stops when the TUI does: containers survive, but their
-		// agents lose API access until saint is relaunched, which is why the
-		// header carries the proxy state at all times rather than failing quietly.
-		status, serving, shutdown := startEmbeddedProxy(ctx, st, kc, containerPath, logger, meter, proxyErr)
-		defer shutdown()
-		if serving {
-			loader.Usage = meter
-		}
-
-		model := tui.NewModel(loader, svc).
-			WithProxyStatus(status).
-			WithCredentials(newTUICredentials(st, kc))
-		_, err := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
-		return err
+	// Every command that starts a session goes through deps, which sets the
+	// proxy URL and starts the proxy. An unset ProxyURL would leave the
+	// guest talking to the provider directly with whatever it can find.
+	deps := sessionDeps{
+		svc:          svc,
+		ensureProxy:  newProxyStarter(st, containerPath).ensure,
+		startService: sb.StartSystem,
+		guestURL: func(ctx context.Context) (string, error) {
+			return guestProxyURL(ctx, st, containerPath)
+		},
 	}
 
-	if args[0] == "--list" {
-		return runList(ctx, loader)
+	if len(args) == 0 || args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
+		fmt.Print(usageText)
+		return nil
 	}
 
 	switch args[0] {
@@ -167,35 +147,48 @@ func run(ctx context.Context, args []string) error {
 	case "keychain":
 		return runKeychain(ctx, kc, args[1:])
 	case "new":
-		return runNew(ctx, svc, args[1:])
+		return runNew(ctx, deps, args[1:])
 	case "attach":
-		return runAttach(ctx, svc, args[1:])
+		return runAttach(ctx, deps, args[1:])
 	case "stop":
 		return runStop(ctx, svc, args[1:])
 	case "rm":
 		return runRemove(ctx, svc, args[1:])
 	case "herdr":
-		return runHerdr(ctx, herdrDeps{
-			svc:          svc,
-			ensureProxy:  newProxyStarter(st, containerPath).ensure,
-			startService: sb.StartSystem,
-			guestURL: func(ctx context.Context) (string, error) {
-				return guestProxyURL(ctx, st, containerPath)
-			},
-		}, args[1:])
+		return runHerdr(ctx, deps, args[1:])
 	default:
 		return fmt.Errorf("unknown subcommand %q", args[0])
 	}
 }
 
-func runList(ctx context.Context, loader *tui.SnapshotLoader) error {
+func runList(ctx context.Context, loader *inventory.Loader) error {
 	snapshot, err := loader.Load(ctx)
 	if err != nil {
 		return err
 	}
-	fmt.Print(tui.FormatPlainTable(snapshot))
+	fmt.Print(inventory.FormatTable(snapshot))
+	for _, warning := range snapshot.Warnings {
+		fmt.Fprintln(os.Stderr, "warning:", warning)
+	}
 	return nil
 }
+
+const usageText = `saint runs coding agents in Apple container microVMs, behind a proxy that
+holds their credentials. In herdr, open a sandboxed pane with the saint.new
+action; see README.md.
+
+Usage:
+  saint new [-rt claude|codex] [-name N] [-ask] <repo>...   create a session and attach
+  saint attach <session>     attach to a session
+  saint ls                   list sessions and files to review
+  saint stop <session>       stop a session's microVM
+  saint rm <session>         delete a session (repositories are not touched)
+  saint auth                 show and set credentials
+  saint proxy                run the credential proxy in the foreground
+  saint proxy log            what the agents called, most recent first
+  saint doctor               check the host, runtime, credentials and proxy
+  saint herdr open|pane      herdr plugin entrypoints
+`
 
 func runDoctor(ctx context.Context, st *store.Store, kc *keychain.Keychain, containerPath, gitPath string, args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
@@ -323,9 +316,8 @@ func usageLine(ev proxy.UsageEvent) string {
 	)
 }
 
-// newProxyServer builds the proxy listener. Both `saint proxy` and the TUI go
-// through here so there is exactly one construction path and one set of
-// timeouts.
+// newProxyServer builds the proxy listener. There is exactly one construction
+// path and one set of timeouts, whoever starts the proxy.
 //
 // The returned journal belongs to the caller: it owns a goroutine and an open
 // file, and must be closed when the server stops.
@@ -385,8 +377,7 @@ func newProxyServer(ctx context.Context, st *store.Store, kc *keychain.Keychain,
 		// alone, so neither has its own setting.
 		Forward: guestEgressForward(cfg),
 
-		// What makes a session's activity visible. Begin is nil-safe, so
-		// `saint proxy` - which has no TUI and passes no meter - is unaffected.
+		// Begin and Record are nil-safe; `saint proxy` passes no meter.
 		OnRequestStart: meter.Begin,
 
 		OnUsage: func(ev proxy.UsageEvent) {
@@ -476,8 +467,8 @@ func runProxy(ctx context.Context, st *store.Store, kc *keychain.Keychain, conta
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Standalone `saint proxy` has no TUI to render totals, so it meters to the
-	// log only. Record is nil-safe.
+	// Nothing in this process reads live totals, so usage goes to the journal
+	// only. Record is nil-safe.
 	rt, err := newProxyServer(ctx, st, kc, containerPath, logger, nil)
 	if err != nil {
 		return err
@@ -535,7 +526,7 @@ func runKeychain(ctx context.Context, kc *keychain.Keychain, args []string) erro
 	}
 }
 
-func runNew(ctx context.Context, svc *session.Service, args []string) error {
+func runNew(ctx context.Context, deps sessionDeps, args []string) error {
 	fs := flag.NewFlagSet("new", flag.ContinueOnError)
 	runtimeFlag := fs.String("rt", "", "runtime: claude or codex")
 	nameFlag := fs.String("name", "", "session name")
@@ -566,7 +557,7 @@ func runNew(ctx context.Context, svc *session.Service, args []string) error {
 		repos = append(repos, sandbox.Repo{Path: path})
 	}
 
-	created, err := svc.Create(ctx, session.CreateRequest{
+	return startAndAttach(ctx, deps, bufio.NewReader(os.Stdin), os.Stdout, session.CreateRequest{
 		Name:            *nameFlag,
 		Repos:           repos,
 		Runtime:         runtime,
@@ -576,11 +567,6 @@ func runNew(ctx context.Context, svc *session.Service, args []string) error {
 		SkipPermissions: !*askFlag,
 		Credential:      *credentialFlag,
 	})
-	if err != nil {
-		return err
-	}
-
-	return execAttach(svc.AttachCmd(created.ID))
 }
 
 func execAttach(cmd *exec.Cmd, err error) error {
@@ -593,22 +579,11 @@ func execAttach(cmd *exec.Cmd, err error) error {
 	return cmd.Run()
 }
 
-func runAttach(ctx context.Context, svc *session.Service, args []string) error {
+func runAttach(ctx context.Context, deps sessionDeps, args []string) error {
 	if len(args) == 0 {
 		return errors.New("usage: saint attach <name|id>")
 	}
-
-	found, err := svc.Find(args[0])
-	if err != nil {
-		return err
-	}
-
-	if err := svc.Start(ctx, found.ID); err != nil && !strings.Contains(err.Error(), "already running") {
-		// `container start` is only needed for stopped sessions; a running
-		// container will be attached below.
-	}
-
-	return execAttach(svc.AttachCmd(found.ID))
+	return reattach(ctx, deps, args[0])
 }
 
 type debugLogger struct {
@@ -661,114 +636,6 @@ func guestProxyURL(ctx context.Context, st *store.Store, containerPath string) (
 		return "", err
 	}
 	return "http://" + net.JoinHostPort(gateway, strconv.Itoa(cfg.ProxyPortOrDefault())), nil
-}
-
-// startEmbeddedProxy runs the proxy alongside the TUI and returns a one-line
-// status for the header plus a shutdown func.
-//
-// A failure here is deliberately not fatal: saint remains usable for inspecting
-// and attaching to sessions. It must be loud, though - silently falling back to
-// "the agent uses whatever credentials it can find" is the one outcome that
-// defeats the point of the proxy.
-// The second result reports whether the proxy in *this* process is the one
-// carrying the sessions' traffic. It is what makes the meter's numbers a
-// measurement rather than a shape: an external proxy, a failed bind, or a
-// listener the firewall is dropping all leave the meter reading zero forever,
-// and a caller that rendered those as totals and idle sessions would be
-// inventing both.
-func startEmbeddedProxy(ctx context.Context, st *store.Store, kc *keychain.Keychain, containerPath string, logger *debugLogger, meter *usage.Meter, discoverErr error) (string, bool, func()) {
-	noop := func() {}
-	if discoverErr != nil {
-		return "proxy off: " + discoverErr.Error(), false, noop
-	}
-
-	rt, err := newProxyServer(ctx, st, kc, containerPath, logger, meter)
-	if err != nil {
-		return "proxy off: " + err.Error(), false, noop
-	}
-
-	// Another saint (or a standalone `saint proxy`) may already hold the port.
-	// Reuse it rather than fighting over the bind and killing the TUI.
-	listener, err := net.Listen("tcp", rt.Addr)
-	if err != nil {
-		rt.Journal.Close()
-		if probeProxy(rt.Addr) {
-			return "proxy: external " + rt.Addr, false, noop
-		}
-		return "proxy off: " + err.Error(), false, noop
-	}
-
-	go func() {
-		if err := rt.Server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Printf("proxy stopped: %v", err)
-		}
-	}()
-
-	status := "proxy: " + rt.Addr + " · " + describeAuthMode(st, kc, logger)
-
-	// Binding succeeds even when the macOS application firewall will drop every
-	// connection to a non-loopback interface, so a successful Listen proves
-	// nothing. Self-probe: if we cannot reach our own listener, no guest can
-	// either, and that has to be visible rather than looking healthy.
-	serving := true
-	if !probeProxy(rt.Addr) {
-		status = "proxy blocked: " + rt.Addr + " (firewall? run saint doctor)"
-		logger.Printf("proxy bound %s but is not reachable; check the macOS application firewall", rt.Addr)
-		// Bound but unreachable means no guest request will ever arrive, so
-		// nothing this proxy could report about a session is measured.
-		serving = false
-	}
-
-	return status, serving, func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		_ = rt.Shutdown(shutdownCtx)
-	}
-}
-
-// describeAuthMode reports which account new sessions will bill.
-//
-// This is on screen at all times rather than in a config file because the two
-// modes charge different accounts, and "auto" resolving one way or the other is
-// exactly the thing a user should not have to guess at.
-func describeAuthMode(st *store.Store, kc *keychain.Keychain, logger *debugLogger) string {
-	cfg, err := st.EnsureConfig()
-	if err != nil {
-		return "auth unknown"
-	}
-	switch cfg.ProxyAuthOrDefault() {
-	case store.ProxyAuthKey:
-		return "api key"
-	case store.ProxyAuthSubscription:
-		if subscriptionAvailable(cfg, kc, logger) {
-			return "subscription"
-		}
-		return "api key (no subscription token)"
-	default:
-		if subscriptionAvailable(cfg, kc, logger) {
-			return "subscription"
-		}
-		return "api key"
-	}
-}
-
-func subscriptionAvailable(cfg store.Config, kc *keychain.Keychain, logger *debugLogger) bool {
-	source, err := credentialSource(cfg, store.CredentialClaudeSubscription, string(keychain.ProviderClaudeSubscription), kc)
-	if err != nil {
-		logger.Printf("subscription credential source unusable: %v", err)
-		return false
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), credential.Timeout)
-	defer cancel()
-
-	// Ask without taking the secret where the source can answer that way.
-	if inspector, ok := source.(credential.Inspector); ok {
-		status, err := inspector.Status(ctx)
-		return err == nil && status.Present && !status.Expired(time.Now())
-	}
-	value, err := source.Get(ctx)
-	return err == nil && value != ""
 }
 
 // probeProxy reports whether something is already accepting connections at addr.

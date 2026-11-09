@@ -30,9 +30,9 @@ its own title style), this file wins.
 - **Conventional commits:** `type(scope): subject`.
   - Types: `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `build`, `ci`,
     `chore`, `revert`. Only `feat` and `fix` bump the version.
-  - Scope: one of `tui`, `proxy`, `session`, `sandbox`, `credential`, `store`,
-    `usage`, `egress`, `tiling`, `doctor`, `keychain`, `cli`; omit it when a
-    change spans several.
+  - Scope: one of `herdr`, `inventory`, `proxy`, `session`, `sandbox`,
+    `credential`, `store`, `usage`, `egress`, `doctor`, `keychain`, `cli`; omit
+    it when a change spans several.
   - Subject: lower case, no full stop, imperative.
   - Breaking change: `type(scope)!: subject` plus a `BREAKING CHANGE:` footer.
 - **Body: one unwrapped paragraph saying why.** What was wrong or missing, what

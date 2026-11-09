@@ -42,8 +42,8 @@ Most of the durable value here is already served by files in the repository.
 saint involvement at all. They are versioned, reviewable in a pull request,
 shared with colleagues, and they survive saint being uninstalled. saint already
 notices when an agent edits them: `.claude/` and `.codex/` are in
-`reviewDirSegments` in `internal/tui/repo_status.go`, so an agent-modified
-instruction file is flagged for review in the list today.
+`reviewDirSegments` in `internal/inventory/repo_status.go`, so an
+agent-modified instruction file is flagged for review by `saint ls` today.
 
 That is a very hard baseline to beat, and any honest version of this feature has
 to concede most of the territory to it. A "durable fact about this repository"
