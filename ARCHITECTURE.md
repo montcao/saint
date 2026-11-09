@@ -29,8 +29,8 @@ When a runtime behaviour surprises you, measure it and add a section.
 
 - **The proxy never imports what answers its questions.** `internal/egress`
   carries them: the proxy takes a function, the answering side takes a queue.
-  `egress` does not import `proxy`, and `proxy` does not import `egress`.
-  *Checked.*
+  `egress` does not import `proxy`, and `proxy` does not import `egress`,
+  directly or through any chain of imports. *Checked.*
 - **Nothing machine-local.** No real home directory in any file, and no
   private-network address in a production string literal; both are discovered
   at runtime. *Checked.*
