@@ -35,7 +35,7 @@ about what an agent faithfully does because a file told it to.
 ## 2. `store.Config` schema
 
 Mirrors the existing `Credentials` / `DefaultCredential` / `MountRoots`
-pattern in `internal/store/store.go`:
+pattern in `internal/store/config.go`:
 
 ```go
 // Skills maps a skill name to where its content lives on disk, so it can be
@@ -196,7 +196,7 @@ func normalizeSkillPath(raw string) (string, error) {
 }
 ```
 
-`underPath` and `resolveOrSelf` already exist in `internal/session/service.go`
+`underPath` and `resolveOrSelf` already exist in `internal/session/mount.go`
 - this reuses them rather than adding a parallel copy.
 
 One deliberate omission: no check against `blockedSystemRoots` or
@@ -366,7 +366,7 @@ the session:
   session that bills the API is still better than no session. A skill has no
   equivalent lesser mode: there is nothing between "the reviewed content" and
   "different content," so drift means refusing, not degrading. See
-  `service.go:867-891`.
+  `RenewCredential` in `internal/session/auth.go`.
 
 This resolves the "refresh vs. keep-original-hashes" question the way stated
 above - refresh, because keeping a stale hash while still mounting current
@@ -534,7 +534,7 @@ action wording (`"· c renews it"`) because, for that row, the key genuinely
 does fix it. Skills break that pairing: `RenewCredential` now refuses to
 renew a session with a drifted skill, the same way it already refuses a
 subscription session it cannot read a fresh credential for (§4,
-`service.go:867-891`) - so for a credential row `c` means "try it," and for a
+`RenewCredential` in `internal/session/auth.go`) - so for a credential row `c` means "try it," and for a
 skill row `c` means "this will fail until you have gone and looked at the
 skill." Printing "c renews it" on the skill row would be the sidebar
 asserting something false about its own interface, which is a worse failure

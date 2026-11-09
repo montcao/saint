@@ -7,7 +7,6 @@ claim); this ledger points at them rather than repeating them.
 
 | Gap | What would close it | Decision |
 |---|---|---|
-| Four Go files are past the 800-line limit and are held at their current length by `internal/archtest`: `internal/proxy/forward.go`, `internal/proxy/forward_test.go`, `internal/session/service.go`, `internal/store/store.go`. | Split each by responsibility, then lower or delete its entry in `grandfathered`. | none needed |
 | Nothing refuses repo-wide staging (`git add -A`, `git add .`), which `docs/operations/workflow.md` forbids. Git has no hook that runs on `git add`. | An agent-host hook (for example a Claude Code `PreToolUse` hook) that rejects those commands. | needed: host settings are untracked by choice (next row) |
 | Agent host settings (`.claude/`, `.cursor/`) are untracked by design, so sandbox and permission bounds are per developer rather than versioned. | Track a shared settings file that denies reads of `.env*` and key files, leaving per-user files ignored. | needed |
 | Two copies of saint run from different worktrees collide: the proxy listens on the fixed `DefaultProxyPort` (8787) and both use the one state directory `~/.saint`. Tests are unaffected; they use `t.TempDir()` and OS-assigned ports. | An OS-assigned proxy port and an override for the state directory. | needed: changes product configuration |

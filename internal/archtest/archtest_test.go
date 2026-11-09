@@ -111,12 +111,7 @@ func TestPackageBoundaries(t *testing.T) {
 // tracked in docs/plans/tech-debt.md. Lower an entry when a file shrinks.
 const maxLines = 800
 
-var grandfathered = map[string]int{
-	"internal/proxy/forward.go":      1195,
-	"internal/proxy/forward_test.go": 1053,
-	"internal/session/service.go":    900,
-	"internal/store/store.go":        918,
-}
+var grandfathered = map[string]int{}
 
 func TestFilesDoNotGrowPastTheLimit(t *testing.T) {
 	root := repoRoot(t)
