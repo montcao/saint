@@ -62,67 +62,122 @@ Known gaps:
 - which account subscription traffic bills is visible only on claude.ai, not
   from saint
 
-## Requirements
+## Get started with herdr
 
-Minimums; newer releases are expected to work and `saint doctor` accepts them:
+saint runs inside [herdr](https://herdr.dev): a saint action opens a pane
+beside the one you are in, and the agent in that pane is already running in a
+microVM with that pane's folder mounted.
+
+### 1. Requirements
 
 - macOS `26` or newer, on Apple silicon (`arm64`)
-- Apple `container` CLI `1.3.0` or newer
+- Apple's [`container`](https://github.com/apple/container) CLI `1.3.0` or newer
+- herdr `0.9.5` or newer
+- Go, to build saint from source (`go.mod` names the version)
 
-## Install
+These are minimums; `saint doctor` checks them and accepts newer releases.
+
+### 2. Build saint and its agent images
 
 ```bash
-make install            # installs to ~/.local/bin/saint
-make allow-firewall     # required for source builds, see below
-saint doctor            # check the setup
+git clone https://github.com/montcao/saint
+cd saint
+make build                    # builds ./saint, the binary herdr will run
+container system start        # if the container service is not running
+./saint doctor --build-images # check the setup and build the agent images
 ```
-
-Override the location with `make install PREFIX=/usr/local` or
-`BINDIR=/somewhere/else/bin`. Other targets: `make build`, `make test`,
-`make check`, `make uninstall`.
-
-**Why the firewall step.** Containers reach the proxy on the bridge gateway, not
-on loopback, and the macOS application firewall filters that interface. Until
-`saint` is allowed through, connections are **dropped rather than refused**, so
-agents hang on every API call instead of reporting an error. A `go build`
-binary is ad-hoc signed, so the "allow signed software" setting does not cover
-it, and the allowance is tied to the binary's path and signature: reinstalling
-to a new path, and sometimes rebuilding, needs it again. Signed releases will
-remove this step.
 
 `saint doctor` checks the macOS and `container` versions, the runtime service,
 the agent images, keychain entries, whether the proxy is reachable (and whether
 the firewall is what blocks it), and that global `core.hooksPath` is unset.
 Where a fix is a command, doctor prints it.
 
-## In herdr
-
-saint's actions open a pane beside the focused one whose agent already runs in
-a microVM, mounted on the focused pane's folder.
+### 3. Let the proxy through the firewall
 
 ```bash
-make build
-make allow-firewall BINDIR="$PWD"             # herdr runs this checkout's ./saint
-herdr plugin link "$PWD"                      # from this checkout
-herdr plugin action invoke saint.new          # Claude
-herdr plugin action invoke saint.new-codex    # Codex
+make allow-firewall BINDIR="$PWD"   # asks for your password
 ```
 
-Bind an action to a key with a `[[keys.command]]` entry of
-`type = "plugin_action"` in herdr's `config.toml`.
+Containers reach saint's proxy on the container bridge, not on loopback, and
+the macOS application firewall filters that interface. Until `saint` is allowed
+through, connections are **dropped rather than refused**, so agents hang on
+every API call instead of reporting an error. A `go build` binary is ad-hoc
+signed, so "allow signed software" does not cover it, and the allowance is
+tied to the binary's path: allow the binary herdr runs, which is this
+checkout's `./saint`. A rebuild can need it again. Signed releases will remove
+this step.
 
-The first pane starts the credential proxy (`saint proxy`), detached so it
-outlives the pane, and every later pane reuses it. If Apple's container service
-is stopped, the pane asks before starting it. Closing a pane ends only its
-attach: the agent keeps running in its microVM. herdr shows the agent's state
-because the pane sets `HERDR_AGENT` on the host side, where herdr reads it.
+### 4. Add a credential
 
-To reopen a session in a pane:
+Once per install; sessions never ask.
+
+```bash
+./saint auth claude      # a Claude subscription token, from `claude setup-token`
+./saint auth anthropic   # or an Anthropic API key, held by the proxy
+./saint auth             # what is set, and which account new sessions bill
+```
+
+[Who pays](#who-pays-key-vs-subscription) explains the difference.
+
+### 5. Add saint to herdr
+
+```bash
+herdr plugin link "$PWD"
+```
+
+Then bind the actions to keys in `~/.config/herdr/config.toml`:
+
+```toml
+[[keys.command]]
+key = "prefix+s"
+type = "plugin_action"
+command = "saint.new"
+description = "sandboxed Claude pane"
+
+[[keys.command]]
+key = "prefix+x"
+type = "plugin_action"
+command = "saint.new-codex"
+description = "sandboxed Codex pane"
+```
+
+Pick any free keys. Without a binding, run the action from a shell in herdr:
+`herdr plugin action invoke saint.new`.
+
+`herdr plugin install montcao/saint` also works and runs `make build` for you,
+but builds into a directory herdr manages: find it as `plugin_root` in
+`herdr plugin list`, and run steps 2 to 4 with that directory's `./saint`.
+
+### 6. Open a sandboxed pane
+
+Focus a pane in the project you want to work on and press your key. The new
+pane:
+
+1. offers to start Apple's container service if it is stopped;
+2. creates a session for the focused pane's folder, in its own microVM;
+3. starts the credential proxy if it is not already running, detached so it
+   outlives the pane;
+4. attaches you to the agent, which herdr tracks as idle, working or blocked.
+
+The first time, Claude Code asks you to accept bypass-permissions mode: the
+microVM is the boundary, so saint runs agents without per-action prompts.
+
+Closing a pane ends only its attach; the agent keeps running in its microVM.
+`./saint ls` lists sessions. To reopen one in a pane:
 
 ```bash
 herdr plugin pane open --plugin saint --entrypoint session \
   --env SAINT_SESSION=<session> --env HERDR_AGENT=claude
 ```
+
+If a pane reports an error, it stays open until you press Enter.
+`./saint doctor` diagnoses most of them.
+
+### Without herdr
+
+`make install` puts `saint` in `~/.local/bin` (override with `PREFIX=` or
+`BINDIR=`), and `make allow-firewall` allows that copy. `saint new <repo>` and
+`saint attach <session>` then work in any terminal.
 
 ## Commands
 
