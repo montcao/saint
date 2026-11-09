@@ -359,37 +359,6 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	return os.RemoveAll(sessionDir)
 }
 
-func (s *Service) Find(ref string) (store.Session, error) {
-	sessions, err := s.Store.LoadSessions()
-	if err != nil {
-		return store.Session{}, err
-	}
-
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return store.Session{}, errors.New("session reference is required")
-	}
-
-	var matches []store.Session
-	for _, session := range sessions {
-		if session.ID == ref {
-			return session, nil
-		}
-		if strings.HasPrefix(session.ID, ref) || strings.HasPrefix(strings.ToLower(session.Name), strings.ToLower(ref)) {
-			matches = append(matches, session)
-		}
-	}
-
-	switch len(matches) {
-	case 0:
-		return store.Session{}, fmt.Errorf("no session matches %q", ref)
-	case 1:
-		return matches[0], nil
-	default:
-		return store.Session{}, fmt.Errorf("multiple sessions match %q", ref)
-	}
-}
-
 func (s *Service) AttachCmd(id string) (*exec.Cmd, error) {
 	return s.Sandbox.AttachCmd(containerName(id), s.attachOptions(id))
 }

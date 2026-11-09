@@ -170,6 +170,19 @@ func run(ctx context.Context, args []string) error {
 		return runNew(ctx, svc, args[1:])
 	case "attach":
 		return runAttach(ctx, svc, args[1:])
+	case "stop":
+		return runStop(ctx, svc, args[1:])
+	case "rm":
+		return runRemove(ctx, svc, args[1:])
+	case "herdr":
+		return runHerdr(ctx, herdrDeps{
+			svc:          svc,
+			ensureProxy:  newProxyStarter(st, containerPath).ensure,
+			startService: sb.StartSystem,
+			guestURL: func(ctx context.Context) (string, error) {
+				return guestProxyURL(ctx, st, containerPath)
+			},
+		}, args[1:])
 	default:
 		return fmt.Errorf("unknown subcommand %q", args[0])
 	}

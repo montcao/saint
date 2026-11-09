@@ -159,7 +159,7 @@ var grandfathered = map[string]int{
 	"internal/tui/model.go":          1859,
 	"internal/proxy/forward.go":      1195,
 	"internal/proxy/forward_test.go": 1053,
-	"internal/session/service.go":    931,
+	"internal/session/service.go":    900,
 	"internal/store/store.go":        918,
 	"internal/tui/rail.go":           819,
 }
