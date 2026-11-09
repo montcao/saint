@@ -11,12 +11,10 @@ It exists because agentic development means several agents running largely
 unattended, against real credentials and real repositories. The blast radius is
 large and nobody is watching.
 
-> **Direction.** saint is becoming a security plugin for
-> [herdr](https://herdr.dev), the terminal workspace for coding agents. herdr
-> will own panes, layout and agent status; saint keeps the part it exists for:
-> a microVM per session, the credential proxy, metering and egress control.
-> This README describes the current standalone build, whose own TUI is
-> expected to be retired.
+saint is a plugin for [herdr](https://herdr.dev), the terminal workspace for
+coding agents. herdr owns panes, layout and agent status; saint opens panes
+whose agent is already running in a microVM, and owns the proxy, metering and
+egress control.
 
 ## What it does
 
@@ -25,9 +23,9 @@ large and nobody is watching.
   token, never your API key
 - Per session: a live Claude Code login, a stored subscription token, or an API
   key, with remaining life shown *before* the session is created
-- Live token metering, context occupancy, and the hosts each session reached,
-  without the agent cooperating
-- Status at a glance: working, idle, or blocked waiting for you
+- Per-request token metering, and the hosts each session reached, without the
+  agent cooperating, in a journal read with `saint proxy log`
+- herdr shows each sandboxed agent as working, idle, or blocked waiting for you
 - Pinned agent versions with self-update blocked
 
 **Never show an invented number.** An unknown is `unknown`: no context
@@ -54,7 +52,7 @@ Working, installed from source. Not yet packaged or released.
 Known gaps:
 
 - no signed releases, so `make allow-firewall` is a required install step
-- token totals reset when saint exits, and carry no cost figure
+- token counts carry no cost figure
 - saint's token counts will not match the agent's own; they are different
   measurements (see [What the token counts mean](#what-the-token-counts-mean))
 - OpenAI context windows are unlisted, so Codex sessions show counts without a
@@ -97,26 +95,14 @@ the agent images, keychain entries, whether the proxy is reachable (and whether
 the firewall is what blocks it), and that global `core.hooksPath` is unset.
 Where a fix is a command, doctor prints it.
 
-## Run
-
-```bash
-saint            # the TUI
-saint ls         # plain-text session list
-saint doctor     # check the setup
-saint proxy log  # what the agents called, most recent first
-saint stop <session>  # stop a session's microVM, keep the session
-saint rm <session>    # delete a session; your repositories are not touched
-SAINT_DEBUG=1 saint   # verbose logging to ~/.saint/saint.log
-```
-
 ## In herdr
 
-saint is also a [herdr](https://herdr.dev) plugin. Its actions open a pane
-beside the focused one whose agent already runs in a microVM, mounted on the
-focused pane's folder.
+saint's actions open a pane beside the focused one whose agent already runs in
+a microVM, mounted on the focused pane's folder.
 
 ```bash
 make build
+make allow-firewall BINDIR="$PWD"             # herdr runs this checkout's ./saint
 herdr plugin link "$PWD"                      # from this checkout
 herdr plugin action invoke saint.new          # Claude
 herdr plugin action invoke saint.new-codex    # Codex
@@ -138,47 +124,22 @@ herdr plugin pane open --plugin saint --entrypoint session \
   --env SAINT_SESSION=<session> --env HERDR_AGENT=claude
 ```
 
-## Keys
+## Commands
 
-In the session list:
+```bash
+saint new [-rt codex] [-ask] <repo>...  # create a session and attach, outside herdr
+saint attach <session>  # reattach; starts it and the proxy if needed
+saint ls                # sessions, their state, and files to review
+saint stop <session>    # stop a session's microVM, keep the session
+saint rm <session>      # delete a session; your repositories are not touched
+saint doctor            # check the setup
+saint proxy log         # what the agents called, most recent first
+SAINT_DEBUG=1 saint ls  # verbose logging to ~/.saint/saint.log
+```
 
-| Key | Action |
-|---|---|
-| `↑` `↓` | move selection |
-| `enter` | attach to the selected session (starts it first if stopped) |
-| `n` | new session |
-| `x` | stop session |
-| `d` | delete session, or remove an orphan container (confirms) |
-| `a` | credentials and billing |
-| `c` | renew the selected session's credential (replaces its microVM) |
-| `s` | control rail: what is currently true of this machine |
-| `/` | filter |
-| `v` | switch between the table and session blocks |
-| `?` | full key reference |
-| `:` | command line (`q`, `new`, `auth`, `detach`, `refresh`, `help`) |
-| `q` | quit |
-
-Attached to a session, **almost every keystroke goes to the agent**, including
-`q`, `:`, `esc` and `ctrl+c`. saint keeps only these:
-
-| Key | Action |
-|---|---|
-| `ctrl+\` | detach; the session keeps running in its container |
-| `ctrl+q` | force quit saint, even if the agent is unresponsive |
-| `PgUp` / `PgDn`, `shift+↑` / `shift+↓` | scroll saint's view of the pane |
-
-**`ctrl+\` and `ctrl+q` are the only way out of an attached session.** If an
-agent stops responding, everything else goes to it and appears to do nothing;
-`ctrl+q` is handled by saint itself and always works. If saint is ever killed
-while attached and your terminal is left unusable, run `reset`.
-
-Quitting the agent stops the container. Detaching leaves it running, and
-re-attaching is instant.
-
-The mouse wheel is handed to a full-screen agent as a mouse report so it
-scrolls its own view; it is never translated into arrow keys, which an agent
-would read as walking back through prompt history. To select text, hold the key
-your terminal reserves for it (⌥ in Ghostty and iTerm2, shift in xterm).
+A session is a `<session>` by name, ID, ID prefix or container name
+(`saint-<id>`). `saint new` and `saint attach` start the proxy the same way a
+herdr pane does.
 
 ## The API proxy
 
@@ -217,14 +178,12 @@ real key.
 | `key` | always the API key |
 | `subscription` | prefer the subscription; fall back to `key` with a warning |
 
-The resolved mode is in the TUI header, beside each session in the sidebar, and
-in `saint doctor`. saint is never silent about which account is paying. Codex
+The resolved mode is shown by `saint auth` and `saint doctor`. saint is never silent about which account is paying. Codex
 sessions are always `key`.
 
 ### Setting up
 
 Authentication is once per install, not per session. Sessions never prompt.
-Press `a` in the TUI, or:
 
 ```bash
 saint auth              # what is set, and which account new sessions bill
@@ -294,9 +253,10 @@ presenting the same token are both refused.
 
 ### Proxy settings
 
-The proxy runs inside the TUI, so it stops when saint does: containers keep
-running but their agents lose API access until you relaunch, which is why the
-header always shows the proxy state. `saint proxy` runs it standalone.
+The proxy starts on demand, the first time a session needs it, and keeps
+running in the background; its output is in `~/.saint/proxy.out`. If it stops,
+containers keep running but their agents lose API access until a pane or
+`saint attach` starts it again. `saint proxy` runs it in the foreground.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -335,8 +295,8 @@ custody and attribution, **not** egress control.
 
 By default the agent edits without asking: the microVM is the boundary, and an
 agent that stops to ask before every edit inside its own sandbox is mostly
-friction. Choose `ask` in the spawn form, or `saint new -ask`, when the mounted
-contents matter more than the speed.
+friction. Use `saint new -ask` when the mounted contents matter more than the
+speed. herdr panes always skip prompts.
 
 The images pin exact agent versions, and sessions run with
 `DISABLE_UPDATES=1` so an agent cannot fetch and execute a new version of
@@ -353,7 +313,7 @@ itself inside the sandbox. Update a runtime by bumping the version in
 
 When an agent reaches a provider outside the proxy's upstream allowlist, saint
 is **not in the path**: that traffic is direct, unmetered and uncustodied, and
-the agent's row says so. Widening the allowlist is deliberately not the answer;
+the journal has no record of it. Widening the allowlist is deliberately not the answer;
 the closed list is what stops a credential-injecting hop becoming a pivot.
 
 ## What the token counts mean
@@ -361,17 +321,14 @@ the closed list is what stops a credential-injecting hop becoming a pivot.
 saint counts what crossed the proxy. The agent counts its own conversation.
 They will not agree, and the gap is not a bug.
 
-- **Totals are the sum of every request.** A Claude Code turn re-sends the
-  whole history, mostly as cache reads, so a long session's total is roughly
-  *conversation size × turns*: large, correct, and matching nothing the agent
-  shows.
+- **Each request is counted in full.** A Claude Code turn re-sends the whole
+  history, mostly as cache reads, so summing a long session's records gives
+  roughly *conversation size × turns*: large, correct, and matching nothing
+  the agent shows.
 - **saint meters requests the agent does not show you**, such as title
   generation and subagent calls under the same session token.
-- **`context` is occupancy, not a total**: the most recent request's prompt
-  size, rendered against a verified context window.
-- **The block list's `in+out` excludes cache tokens** and is labelled as such;
-  the sidebar shows `in`, `out`, `cache read` and `cache write` separately.
-- **Totals live as long as the saint process** whose proxy measured them.
+- **Cache tokens are separate counters**: `in`, `out`, `cache read` and
+  `cache write` are recorded per request.
 
 saint publishes no cost figure. Prices differ by model, by cache read versus
 write, and by billing mode.
@@ -400,7 +357,7 @@ size:
 ## Contributing
 
 ```bash
-make check    # gofmt, go vet, race-enabled tests
+make check    # gofmt, go vet, race-enabled tests, structural tests
 ```
 
 Run it and quote the output. "Should work" is not a result. Two rules matter

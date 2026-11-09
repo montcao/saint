@@ -2,19 +2,22 @@
 
 Do not rediscover these.
 
-- **A headless `vt` emulator hangs on any device query**, because it answers
-  into a synchronous pipe with no reader. `blocked.go` strips queries before
-  replay. A reader cannot be shut down cleanly: `SafeEmulator` does not lock
-  `Read`, and `Close` then races it on a plain bool inside the library.
-- **`Emulator.Render()` emits SGR.** Strip styling before pattern-matching, or
-  phrases arrive as `Enter<sgr> to<sgr> confirm` and every match silently
-  fails.
-- **A raw transcript cannot be pattern-matched.** A full-screen agent paints at
-  absolute cursor positions; replay it through an emulator first, then read
-  only the footer.
-- **Test fixtures must enter the alternate screen.** Scroll tests that drove
-  `/bin/cat` on the primary screen passed for as long as the feature was
-  broken.
-- **Hit-testing must measure** by rendering the same functions the view
-  renders. A second copy of the layout arithmetic drifts and clicks land on the
-  wrong rows.
+- **A herdr pane closes when its command exits.** An error printed by a pane
+  command is gone before anyone reads it, so `saint herdr pane` waits for
+  Enter after any failure.
+- **A plugin pane starts in the plugin root, not the user's folder.** The
+  folder to mount comes from the action's `HERDR_PLUGIN_CONTEXT_JSON`
+  (`focused_pane_cwd`) and is passed to the pane as `SAINT_REPO`.
+- **`HERDR_AGENT` must be on the host process.** Set in the guest, herdr never
+  sees it and the pane reads as `unknown`.
+- **A shell inside a herdr pane inherits `HERDR_SOCKET_PATH`**, so herdr
+  commands run from it act on the live session. Test against a named session
+  (`herdr --session <name> server`) and point `HERDR_SOCKET_PATH` at its
+  socket. The plugin registry is global per user even then.
+- **The proxy cannot bind before the first container exists.** The bridge
+  address appears only while a container is attached, so start the container,
+  then the proxy (`docs/research/spikes.md`).
+- **saint refuses to mount `/tmp` and `/private/tmp`.** A scratch project for a
+  test has to live under a mount root, such as a folder in your home directory.
+- **commitlint rejects any capital in the subject**, including in a word like
+  "microVM".

@@ -1,4 +1,4 @@
-package tui
+package inventory
 
 import (
 	"os"
@@ -49,7 +49,7 @@ func TestIsReviewPath(t *testing.T) {
 		{name: "leading dot slash", path: "./Makefile", want: true},
 
 		// Must stay quiet.
-		{name: "source file", path: "internal/tui/model.go", want: false},
+		{name: "source file", path: "internal/inventory/inventory.go", want: false},
 		{name: "readme", path: "README.md", want: false},
 		{name: "lockfile", path: "package-lock.json", want: false},
 		{name: "package.json substring", path: "docs/about-package.json.md", want: false},

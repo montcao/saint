@@ -6,7 +6,7 @@
 //
 //   - a relative Markdown link must resolve to a file or directory;
 //   - a backticked path under a top-level directory the repository has (for
-//     example `internal/tui/palette.go`) must exist;
+//     example `internal/inventory/inventory.go`) must exist;
 //   - a `make <target>` in inline code or a code block must be a real target;
 //   - a document named as NAME.md, in Markdown or in a Go comment, must be a
 //     tracked file;

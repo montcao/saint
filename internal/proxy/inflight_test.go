@@ -12,7 +12,7 @@ import (
 )
 
 // inFlightRecorder is the host side of Config.OnRequestStart, kept the way the
-// TUI's meter keeps it: a live count that has to come back to zero, and a
+// usage meter keeps it: a live count that has to come back to zero, and a
 // high-water mark so a test can tell "never counted" from "counted and
 // balanced".
 type inFlightRecorder struct {

@@ -40,24 +40,13 @@ the sidebar says which credential it carries.
 **Authenticate once per install, never per session.** Sessions get a random
 per-session token for attribution; they never ask the user for anything.
 
-**One colour, one meaning.** `internal/tui/palette.go` is the only file that
-names an ANSI index. There is one saturated colour and it means a person has to
-act; everything else is a step on a grey ramp, so a frame with no colour in it
-means nothing needs you. Colour is never the only carrier of a state - which
-binds harder now that almost all hue is gone, so anything that leaned on it has
-to say the word.
-
-**Stillness is the default.** Nothing in the interface moves unless a session is
-working, and then exactly one cell does. The animation clock is not paused when
-the deck is idle, it is not scheduled, so an idle saint wakes up for nothing.
-Motion that is always present is wallpaper within a day.
-
 **Say which measurement a number is.** saint counts what crossed the proxy; an
 agent counts its own conversation, and the two never agree. A figure that
 excludes cache tokens is labelled for what it counts, not called a total. This
 is the same rule as the one above it, in the place it is easiest to break.
 
-**Every quit path must work.** A TUI that can become unquittable is the worst
-failure this codebase has shipped. `ctrl+q` is handled before any forwarding,
-`Close()` is bounded by a timeout, and there are regression tests using a
-deliberately wedged child process.
+**Every quit path must work.** An interface that can become unquittable is the
+worst failure this codebase has shipped, in the TUI that preceded the herdr
+plugin. A pane, an attach or a proxy shutdown must never wait without a bound,
+and a failure that ends a pane waits for the person to read it rather than
+vanishing with it.

@@ -93,7 +93,7 @@ type Session struct {
 // Meter accumulates usage events by session.
 //
 // It is safe for concurrent use: the proxy calls Record from the goroutine
-// copying a response, so several sessions can report at once while the TUI
+// copying a response, so several sessions can report at once while a reader
 // reads a snapshot.
 type Meter struct {
 	mu sync.Mutex
@@ -215,7 +215,7 @@ func (m *Meter) Session(id string) (Session, bool) {
 	return s, ok
 }
 
-// Snapshot copies the current totals. The caller owns the result, so the TUI can
+// Snapshot copies the current totals. The caller owns the result, so a reader can
 // render from it without holding the lock.
 // noteEndpoint records which upstream a request went to.
 func (s *Session) noteEndpoint(ev proxy.UsageEvent, now time.Time) {

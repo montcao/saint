@@ -109,7 +109,7 @@ func herdrBinary() string {
 	return "herdr"
 }
 
-func runHerdr(ctx context.Context, deps herdrDeps, args []string) error {
+func runHerdr(ctx context.Context, deps sessionDeps, args []string) error {
 	if len(args) == 0 {
 		return errors.New("usage: saint herdr open [claude|codex] | saint herdr pane")
 	}
@@ -149,8 +149,9 @@ func runHerdrOpen(ctx context.Context, args []string) error {
 	return cmd.Run()
 }
 
-// herdrDeps is what the pane needs from the wiring in run.
-type herdrDeps struct {
+// sessionDeps is what starting or reopening a session needs from the wiring
+// in run, for `saint new`, `saint attach` and the herdr pane alike.
+type sessionDeps struct {
 	svc          *session.Service
 	ensureProxy  func(context.Context) error
 	startService func(context.Context) error
@@ -160,7 +161,7 @@ type herdrDeps struct {
 // runHerdrPane is the pane entrypoint. herdr closes a pane when its command
 // exits, so every failure waits for Enter: an error that vanishes with its
 // pane is an error nobody read.
-func runHerdrPane(ctx context.Context, deps herdrDeps, in io.Reader, out io.Writer) error {
+func runHerdrPane(ctx context.Context, deps sessionDeps, in io.Reader, out io.Writer) error {
 	reader := bufio.NewReader(in)
 	err := herdrPane(ctx, deps, reader, out)
 	if err != nil {
@@ -170,19 +171,10 @@ func runHerdrPane(ctx context.Context, deps herdrDeps, in io.Reader, out io.Writ
 	return err
 }
 
-func herdrPane(ctx context.Context, deps herdrDeps, in *bufio.Reader, out io.Writer) error {
+func herdrPane(ctx context.Context, deps sessionDeps, in *bufio.Reader, out io.Writer) error {
 	if ref := os.Getenv(envSession); ref != "" {
-		found, err := deps.svc.Find(ref)
-		if err != nil {
-			return err
-		}
-		_ = deps.svc.Start(ctx, found.ID)
-		if err := deps.ensureProxy(ctx); err != nil {
-			return err
-		}
-		return execAttach(deps.svc.AttachCmd(found.ID))
+		return reattach(ctx, deps, ref)
 	}
-
 	repo := os.Getenv(envRepo)
 	if repo == "" {
 		return fmt.Errorf("%s is not set; open this pane with the saint action", envRepo)
@@ -191,7 +183,30 @@ func herdrPane(ctx context.Context, deps herdrDeps, in *bufio.Reader, out io.Wri
 	if err != nil {
 		return err
 	}
+	return startAndAttach(ctx, deps, in, out, session.CreateRequest{
+		Repos:           []sandbox.Repo{{Path: repo}},
+		Runtime:         rt,
+		SkipPermissions: true,
+	})
+}
 
+// reattach starts a stopped session if needed, makes sure its proxy is up,
+// and attaches.
+func reattach(ctx context.Context, deps sessionDeps, ref string) error {
+	found, err := deps.svc.Find(ref)
+	if err != nil {
+		return err
+	}
+	// Start fails for a session that is already running, which is fine.
+	_ = deps.svc.Start(ctx, found.ID)
+	if err := deps.ensureProxy(ctx); err != nil {
+		return err
+	}
+	return execAttach(deps.svc.AttachCmd(found.ID))
+}
+
+// startAndAttach creates a session behind the proxy and attaches to it.
+func startAndAttach(ctx context.Context, deps sessionDeps, in *bufio.Reader, out io.Writer, req session.CreateRequest) error {
 	// The guest's proxy address comes from the runtime's network
 	// configuration, so it is known before any container exists. Reading it
 	// is also the first call that needs the container service.
@@ -215,12 +230,12 @@ func herdrPane(ctx context.Context, deps herdrDeps, in *bufio.Reader, out io.Wri
 	}
 	deps.svc.ProxyURL = url
 
-	fmt.Fprintf(out, "saint: starting a %s microVM for %s\n", rt, repo)
-	created, err := deps.svc.Create(ctx, session.CreateRequest{
-		Repos:           []sandbox.Repo{{Path: repo}},
-		Runtime:         rt,
-		SkipPermissions: true,
-	})
+	rt := req.Runtime
+	if rt == "" {
+		rt = sandbox.RuntimeClaude
+	}
+	fmt.Fprintf(out, "saint: starting a %s microVM\n", rt)
+	created, err := deps.svc.Create(ctx, req)
 	if err != nil {
 		return err
 	}

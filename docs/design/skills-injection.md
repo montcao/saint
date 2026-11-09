@@ -476,7 +476,12 @@ credential line already makes mandatory.
 
 ## 7. What the interface shows
 
-`internal/tui/sidebar.go` already groups "what this session carries" above
+This section was written against saint's TUI, which has since been removed in
+favour of the herdr plugin. Its layout reasoning still applies to whatever
+herdr surface shows a session, through `pane.report_metadata`; the file and
+line references do not.
+
+The TUI's sidebar (`sidebar.go`) grouped "what this session carries" above
 "what this session has used": name, runtime and state, last run, then
 `billingLabel` and `credentialLifeLine` (`sidebar.go:271-289` and `:238-265`),
 then a blank line before the context and token blocks. Skills belong in that

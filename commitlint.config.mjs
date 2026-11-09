@@ -28,7 +28,7 @@ export default {
     'scope-enum': [
       2,
       'always',
-      ['tui', 'proxy', 'session', 'sandbox', 'credential', 'store', 'usage', 'egress', 'tiling', 'doctor', 'keychain', 'cli'],
+      ['herdr', 'inventory', 'proxy', 'session', 'sandbox', 'credential', 'store', 'usage', 'egress', 'doctor', 'keychain', 'cli'],
     ],
     'subject-empty': [2, 'never'],
     'subject-case': [2, 'always', 'lower-case'],
