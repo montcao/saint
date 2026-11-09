@@ -2,7 +2,7 @@
 
 Known gaps in the code and the harness, what would close each, and whether it
 needs the owner's decision. Product limits that users should know about are
-stated in `README.md` (Known gaps) and `SECURITY.md` (what saint does not
+stated in `docs/guide/configuration.md` (Known limits) and `SECURITY.md` (what saint does not
 claim); this ledger points at them rather than repeating them.
 
 | Gap | What would close it | Decision |

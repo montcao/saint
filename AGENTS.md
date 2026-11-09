@@ -1,8 +1,8 @@
 # Working on saint
 
-saint is a terminal UI for running AI coding agents in Apple `container`
-microVMs. It ships publicly, so treat every file as something an outside
-developer will read, run, and copy.
+saint is a herdr plugin that opens panes whose AI coding agent is already
+running in an Apple `container` microVM. It ships publicly, so treat every file
+as something an outside developer will read, run, and copy.
 
 This file is the map. Every agent follows it, whatever the model or host, and
 it overrides any harness default about attribution or commit style. Each rule
@@ -61,6 +61,7 @@ remember.
 | What was measured, and on which runtime | [`docs/research/spikes.md`](docs/research/spikes.md) |
 | Traps that cost real time | [`docs/research/gotchas.md`](docs/research/gotchas.md) |
 | What saint does and does not protect | [`SECURITY.md`](SECURITY.md) |
+| Configuration, billing modes, known limits | [`docs/guide/configuration.md`](docs/guide/configuration.md) |
 | Known gaps and what would close them | [`docs/plans/tech-debt.md`](docs/plans/tech-debt.md) |
 | Design proposals, not decisions | [`docs/design/`](docs/design/) |
 | Reviewing a branch; checking docs against code | [`docs/agents/`](docs/agents/) |
