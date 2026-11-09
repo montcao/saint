@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/montcao/saint/internal/sandbox"
@@ -34,10 +35,22 @@ type RepoStatus struct {
 type RepoInspector struct {
 	gitPath string
 	logf    func(string, ...any)
+
+	excludesOnce sync.Once
+	// excludesFile is the user's global ignore file, resolved on first use;
+	// "" when there is none.
+	excludesFile string
 }
 
 func NewRepoInspector(gitPath string, logf func(string, ...any)) *RepoInspector {
 	return &RepoInspector{gitPath: gitPath, logf: logf}
+}
+
+func (i *RepoInspector) globalExcludes(ctx context.Context) string {
+	i.excludesOnce.Do(func() {
+		i.excludesFile = hostExcludesFile(ctx, i.gitPath, os.Environ())
+	})
+	return i.excludesFile
 }
 
 func (i *RepoInspector) Inspect(ctx context.Context, repos []sandbox.Repo) (map[string]RepoStatus, []error) {

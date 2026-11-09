@@ -22,7 +22,8 @@ package inventory
 //   - index, objects, refs and the other data git reads are symlinks back to
 //     the real repository.
 //
-// System and global configuration are switched off, inherited GIT_* variables
+// System and global configuration are switched off, except the user's global
+// ignore file (git_excludes.go), inherited GIT_* variables
 // are dropped, submodules are not entered (their configuration is just as
 // writable), and optional locks are off so git does not write the real index.
 // What remains is git reading data, which a guest controls anyway.
@@ -244,13 +245,17 @@ func isolatedGitEnv() []string {
 // The -c settings repeat what the missing configuration already guarantees, so
 // a git that grows a new default cannot quietly undo it.
 func (i *RepoInspector) runIsolatedGit(ctx context.Context, shadow, workTree string, args ...string) (string, error) {
-	full := append([]string{
+	full := []string{
 		"--git-dir=" + shadow,
 		"--work-tree=" + workTree,
 		"-c", "core.fsmonitor=false",
 		"-c", "core.hooksPath=/dev/null",
 		"-c", "status.submoduleSummary=false",
-	}, args...)
+	}
+	if excludes := i.globalExcludes(ctx); excludes != "" {
+		full = append(full, "-c", "core.excludesFile="+excludes)
+	}
+	full = append(full, args...)
 	cmd := exec.CommandContext(ctx, i.gitPath, full...)
 	cmd.Dir = workTree
 	cmd.Env = isolatedGitEnv()
