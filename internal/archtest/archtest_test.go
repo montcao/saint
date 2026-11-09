@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -59,7 +60,10 @@ func goFiles(t *testing.T, root string) []string {
 	return files
 }
 
-// importRules are the package boundaries the code states. The egress package
+// importRules are the package boundaries the code states. Each is checked
+// transitively: a package may not reach a forbidden one through any chain of
+// imports, because an indirect dependency couples them as tightly as a direct
+// one. The egress package
 // exists so the proxy never imports whatever answers its questions: the proxy
 // takes a function and knows nothing about a terminal, the answering side takes
 // a queue and knows nothing about sockets (internal/egress/prompt.go).
@@ -74,36 +78,87 @@ var importRules = []struct {
 
 func TestPackageBoundaries(t *testing.T) {
 	root := repoRoot(t)
-	fset := token.NewFileSet()
+	graph := importGraph(t, root)
 
 	for _, rule := range importRules {
-		matches, err := filepath.Glob(filepath.Join(root, rule.pkg, "*.go"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(matches) == 0 {
+		if _, ok := graph[rule.pkg]; !ok {
 			t.Fatalf("%s has no Go files; update importRules if the package moved", rule.pkg)
 		}
-		for _, path := range matches {
-			if strings.HasSuffix(path, "_test.go") {
-				continue
-			}
-			file, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
-			if err != nil {
-				t.Fatalf("parse %s: %v", path, err)
-			}
-			for _, imp := range file.Imports {
-				target, _ := strconv.Unquote(imp.Path.Value)
-				for _, bad := range rule.forbidden {
-					if target == module+"/"+bad {
-						rel, _ := filepath.Rel(root, path)
-						t.Errorf("%s:%d: %s imports %s; %s",
-							rel, fset.Position(imp.Pos()).Line, rule.pkg, bad, rule.instead)
-					}
-				}
+		for _, bad := range rule.forbidden {
+			if chain := importChain(graph, rule.pkg, bad); chain != nil {
+				first := graph[rule.pkg][chain[1]]
+				t.Errorf("%s: %s reaches %s through %s; %s",
+					first, rule.pkg, bad, strings.Join(chain, " -> "), rule.instead)
 			}
 		}
 	}
+}
+
+// importGraph maps each package in the module, by its path relative to the
+// module root, to the module packages its non-test files import, each with the
+// file and line of one import that brings it in. Test files are left out: a
+// test may import whatever it needs to exercise a package, and the boundaries
+// are about what ships.
+func importGraph(t *testing.T, root string) map[string]map[string]string {
+	t.Helper()
+	fset := token.NewFileSet()
+	graph := map[string]map[string]string{}
+	for _, rel := range goFiles(t, root) {
+		if strings.HasSuffix(rel, "_test.go") {
+			continue
+		}
+		pkg := filepath.ToSlash(filepath.Dir(rel))
+		if graph[pkg] == nil {
+			graph[pkg] = map[string]string{}
+		}
+		file, err := parser.ParseFile(fset, filepath.Join(root, rel), nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatalf("parse %s: %v", rel, err)
+		}
+		for _, imp := range file.Imports {
+			target, _ := strconv.Unquote(imp.Path.Value)
+			dep, ok := strings.CutPrefix(target, module+"/")
+			if !ok {
+				continue
+			}
+			if _, seen := graph[pkg][dep]; !seen {
+				graph[pkg][dep] = fmt.Sprintf("%s:%d", rel, fset.Position(imp.Pos()).Line)
+			}
+		}
+	}
+	return graph
+}
+
+// importChain returns the shortest chain of imports from one package to
+// another, both included, or nil when there is none. Shortest, so the message
+// names the most direct route to cut.
+func importChain(graph map[string]map[string]string, from, to string) []string {
+	prev := map[string]string{from: ""}
+	queue := []string{from}
+	for len(queue) > 0 {
+		pkg := queue[0]
+		queue = queue[1:]
+		deps := make([]string, 0, len(graph[pkg]))
+		for dep := range graph[pkg] {
+			deps = append(deps, dep)
+		}
+		sort.Strings(deps)
+		for _, dep := range deps {
+			if _, seen := prev[dep]; seen {
+				continue
+			}
+			prev[dep] = pkg
+			if dep == to {
+				chain := []string{to}
+				for p := pkg; p != ""; p = prev[p] {
+					chain = append([]string{p}, chain...)
+				}
+				return chain
+			}
+			queue = append(queue, dep)
+		}
+	}
+	return nil
 }
 
 // maxLines is the most a Go file may hold. Files already past it are held at
