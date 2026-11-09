@@ -98,7 +98,10 @@ func New(home string) *Store {
 }
 
 func DefaultPaths(home string) Paths {
-	root := filepath.Join(home, ".saint")
+	return pathsAt(home, filepath.Join(home, ".saint"))
+}
+
+func pathsAt(home, root string) Paths {
 	return Paths{
 		Home:         home,
 		Root:         root,
@@ -134,13 +137,12 @@ func (s *Store) EnsureConfig() (Config, error) {
 	}
 	cfg, err := s.LoadConfig()
 	if errors.Is(err, fs.ErrNotExist) {
-		cfg = DefaultConfig()
-		if err := s.SaveConfig(cfg); err != nil {
-			return Config{}, err
-		}
-		return cfg, nil
+		return s.createConfig()
 	}
-	return cfg, err
+	if err != nil {
+		return Config{}, err
+	}
+	return s.ensureProxyPort(cfg)
 }
 
 // LoadSessions returns the sessions whose IDs pass validation. Entries with an

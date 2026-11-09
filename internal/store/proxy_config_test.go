@@ -2,32 +2,6 @@ package store
 
 import "testing"
 
-// A config written without proxy_port used to bind port 0 - an ephemeral port
-// nothing could find. The fallback must cover that and out-of-range values.
-func TestProxyPortOrDefault(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name string
-		port int
-		want int
-	}{
-		{name: "unset", port: 0, want: DefaultProxyPort},
-		{name: "negative", port: -1, want: DefaultProxyPort},
-		{name: "too large", port: 70000, want: DefaultProxyPort},
-		{name: "configured", port: 9999, want: 9999},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if got := (Config{ProxyPort: tc.port}).ProxyPortOrDefault(); got != tc.want {
-				t.Fatalf("ProxyPortOrDefault() = %d, want %d", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestProxyBindResolution(t *testing.T) {
 	t.Parallel()
 

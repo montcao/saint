@@ -61,7 +61,10 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	st := store.New(home)
+	st, err := store.NewFromEnv(home)
+	if err != nil {
+		return err
+	}
 	logger := newDebugLogger(st)
 
 	// container and git stay on exec.LookPath on purpose: both are installed
@@ -406,7 +409,7 @@ func newProxyServer(ctx context.Context, st *store.Store, kc *keychain.Keychain,
 		served = newJournalHandler(handler, jr, tokens)
 	}
 
-	addr := net.JoinHostPort(bindHost, strconv.Itoa(cfg.ProxyPortOrDefault()))
+	addr := net.JoinHostPort(bindHost, strconv.Itoa(cfg.ProxyPort))
 	server := &http.Server{
 		Addr:    addr,
 		Handler: served,
@@ -635,7 +638,7 @@ func guestProxyURL(ctx context.Context, st *store.Store, containerPath string) (
 	if err != nil {
 		return "", err
 	}
-	return "http://" + net.JoinHostPort(gateway, strconv.Itoa(cfg.ProxyPortOrDefault())), nil
+	return "http://" + net.JoinHostPort(gateway, strconv.Itoa(cfg.ProxyPort)), nil
 }
 
 // probeProxy reports whether something is already accepting connections at addr.
