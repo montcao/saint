@@ -34,9 +34,7 @@ When a runtime behaviour surprises you, measure it and add a section.
 - **Nothing machine-local.** No real home directory in any file, and no
   private-network address in a production string literal; both are discovered
   at runtime. *Checked.*
-- **Files stay a reviewable size.** No Go file over 800 lines; the few already
-  past it may shrink but not grow. *Checked.* Splitting them is tracked in
-  `docs/plans/tech-debt.md`.
+- **Files stay a reviewable size.** No Go file over 800 lines. *Checked.*
 - **Host-side git never reads a mounted repository's configuration.** A guest
   can write `.git/` in every mount, so the repository inspection runs git
   against a throwaway git directory (`internal/inventory/git_isolated.go`). Covered

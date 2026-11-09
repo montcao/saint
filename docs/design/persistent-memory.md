@@ -18,7 +18,7 @@ trust-this-folder dialog, having never seen the user before.
 Three concrete losses today, in order of how annoying they are:
 
 **Renewing a credential destroys the agent's history.** `RenewCredential` in
-`internal/session/service.go` calls `Sandbox.Remove` and then `Sandbox.Create`.
+`internal/session/auth.go` calls `Sandbox.Remove` and then `Sandbox.Create`.
 The session directory mounted at `/saint` survives, so `transcript.log`
 survives. The guest's home directory does not, and that is where Claude Code
 keeps the conversation `--continue` resumes. Press `c` to repair an expiring
