@@ -170,6 +170,10 @@ func run(ctx context.Context, args []string) error {
 		return runNew(ctx, svc, args[1:])
 	case "attach":
 		return runAttach(ctx, svc, args[1:])
+	case "stop":
+		return runStop(ctx, svc, args[1:])
+	case "rm":
+		return runRemove(ctx, svc, args[1:])
 	default:
 		return fmt.Errorf("unknown subcommand %q", args[0])
 	}
