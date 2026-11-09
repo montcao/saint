@@ -14,7 +14,8 @@ nothing about whether the document is still true.
 | [`AGENTS.md`](../AGENTS.md) | entry point | the map: commands, one-line rules, where everything lives | Reviewed: 2026-11-09 edited |
 | [`CLAUDE.md`](../CLAUDE.md) | entry point | nothing; points Claude Code at `AGENTS.md` | Reviewed: 2026-11-06 edited |
 | [`ARCHITECTURE.md`](../ARCHITECTURE.md) | architecture | which package owns which answer, and the boundaries between them | Reviewed: 2026-11-09 edited |
-| [`README.md`](../README.md) | user guide | what saint does and does not do, install, keys, configuration | Reviewed: 2026-11-09 edited |
+| [`README.md`](../README.md) | user guide | what saint is and how to start using it with herdr | Reviewed: 2026-11-09 edited |
+| [`docs/guide/configuration.md`](guide/configuration.md) | user guide | billing modes, secret stores, mount limits, the request journal, known limits | Reviewed: 2026-11-09 edited |
 | [`SECURITY.md`](../SECURITY.md) | security | how to report a vulnerability; which boundaries saint claims | Reviewed: 2026-11-05 edited |
 | [`docs/design/principles.md`](design/principles.md) | design | what saint is for and the rules that follow from it | Reviewed: 2026-11-09 edited |
 | [`docs/design/persistent-memory.md`](design/persistent-memory.md) | design proposal | nothing yet; a proposal for memory across sessions | Reviewed: 2026-11-09 edited |
