@@ -10,7 +10,7 @@ import (
 )
 
 // The stderr container 1.3.0 printed for `container ls` with its service
-// stopped, recorded in SPIKES.md.
+// stopped, recorded in docs/research/spikes.md.
 const stoppedServiceStderr = `Error: internalError: "failed to list containers" (cause: "interrupted: "XPC connection error: Connection invalid"")
 Ensure container system service has been started with ` + "`container system start`."
 

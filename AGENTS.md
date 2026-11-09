@@ -60,7 +60,7 @@ remember.
 | Which package owns what, and the boundaries | [`ARCHITECTURE.md`](ARCHITECTURE.md) |
 | What saint is for and the rules that follow | [`docs/design/principles.md`](docs/design/principles.md) |
 | Commits, branches, pull requests, merging | [`docs/operations/workflow.md`](docs/operations/workflow.md) |
-| What was measured on real hardware | [`SPIKES.md`](SPIKES.md) |
+| What was measured, and on which runtime | [`docs/research/spikes.md`](docs/research/spikes.md) |
 | Traps that cost real time | [`docs/research/gotchas.md`](docs/research/gotchas.md) |
 | What saint does and does not protect | [`SECURITY.md`](SECURITY.md) |
 | Known gaps and what would close them | [`docs/plans/tech-debt.md`](docs/plans/tech-debt.md) |

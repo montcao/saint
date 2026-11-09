@@ -59,7 +59,7 @@ func (a *AppleContainer) StopSystem(ctx context.Context) error {
 //
 // The service check reads stderr because the CLI exits 1 for everything. Both
 // phrases are what container 1.3.0 printed with its service stopped (see
-// SPIKES.md); a later CLI that rewords them falls through to an unclassified
+// docs/research/spikes.md); a later CLI that rewords them falls through to an unclassified
 // error, which the UI reports as unknown rather than as a wrong answer.
 func classifyRunError(err error, stderr []byte) error {
 	if errors.Is(err, exec.ErrNotFound) || errors.Is(err, fs.ErrNotExist) {

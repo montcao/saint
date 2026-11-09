@@ -50,7 +50,7 @@ func (a *AppleContainer) Create(ctx context.Context, name string, rt Runtime, re
 		// --init puts a real init process at PID 1, with saint's bootstrap
 		// script as its child.
 		//
-		// Two things break without it, both measured (SPIKES.md). PID 1 in a
+		// Two things break without it, both measured (docs/research/spikes.md). PID 1 in a
 		// namespace ignores every signal whose disposition is the default, so
 		// the shell saint ran as PID 1 never saw the SIGTERM from
 		// `container stop` and was SIGKILLed after a timeout instead: 5.3s to

@@ -72,7 +72,7 @@ is a smaller feature than "memory", and it is the one worth building.
 | Kind | Example from saint's own history | Lifetime | Who wrote it | Where it should live |
 |---|---|---|---|---|
 | Durable repo fact | `make check` is gofmt, vet and race tests | years | a human, reviewed | the repo (`CLAUDE.md`) |
-| Decision and rationale | subscription mode leaves the credential in the guest; that is the price of plan billing | years | a human, reviewed | the repo (`README.md`, `SECURITY.md`, `SPIKES.md`) |
+| Decision and rationale | subscription mode leaves the credential in the guest; that is the price of plan billing | years | a human, reviewed | the repo (`README.md`, `SECURITY.md`, `docs/research/spikes.md`) |
 | Episodic session history | session `alpha` already established that `Scrollback()` returns the primary buffer only, so the pane has no history to scroll | hours to days | an agent, unreviewed | saint, scoped and expiring |
 | User preference | plain declarative prose, no emoji, never an invented number | years | the user, directly | saint, global |
 
@@ -102,7 +102,7 @@ configuration alone: `onboardingLines` already writes `~/.claude.json` inside
 the container at bootstrap. **Writing agent config is established precedent;
 patching the agent is the line.**
 
-Second, a constraint from `SPIKES.md`: a guest on an internal network has no DNS
+Second, a constraint from `docs/research/spikes.md`: a guest on an internal network has no DNS
 and exactly one reachable address, the host bridge gateway. Whatever the channel
 is, it terminates on the host, at an address saint already discovers at runtime
 and already binds.
@@ -119,15 +119,15 @@ writes are attributable for free, because the endpoint knows which session
 called it.
 
 Claude Code speaks MCP. **Whether the pinned Codex image does, and through which
-config key, is not verified here** — `SPIKES.md` records `codex-cli 0.149.1` in
-the image and nothing about its MCP surface. That is a spike, not an assumption
+config key, is not verified here** — nothing has yet
+measured the image's MCP surface. That is a spike, not an assumption
 (§7). If it turns out Codex cannot, option A is Claude-only and this design
 loses its whole cross-agent premise, so the spike is blocking.
 
 **B. A filesystem mount the agent is told to read.**
 Mount a memory directory into the guest and name it in the session's
 instructions. Works for every agent that can read a file, which is all of them,
-with no protocol and no adapter. `SPIKES.md` verified `:ro` is enforced on
+with no protocol and no adapter. `docs/research/spikes.md` verified `:ro` is enforced on
 `container` 1.3.0, so a read-only mount is a real boundary rather than a
 convention.
 
@@ -158,7 +158,7 @@ That property is real, and it is not worth the five things it costs:
    `cache_read` and `cache_write` per session, so the regression would appear in
    the sidebar attributed to the agent rather than to saint. In key mode that is
    money; in subscription mode it is the user's plan limits.
-4. `SPIKES.md` already warns that headers and body fields are open lists, and
+4. `docs/research/spikes.md` already warns that headers and body fields are open lists, and
    that a gateway pinned to what existed when it was written breaks on the next
    release. A forwarding gateway degrades by missing a field. A parse-and-
    reserialise gateway degrades by emitting a malformed request.
@@ -254,7 +254,7 @@ worth keeping.
 Shared memory is a persistent, shared, mutable channel between sandboxes saint
 spent real effort isolating.
 
-`SPIKES.md` measured that containers on one internal network already reach each
+`docs/research/spikes.md` measured that containers on one internal network already reach each
 other — a lateral probe returned `ECONNREFUSED`, meaning the packet arrived and
 the peer answered — and concluded that isolating sessions means a network per
 session. **Memory would reintroduce at the application layer exactly the channel
@@ -394,7 +394,7 @@ What M0 proves, in order of how likely it is to kill the feature:
 2. **Is the content worth anything a week later?** Also unknown, and it cannot
    be simulated.
 
-### The measurement, in `SPIKES.md`'s spirit
+### The measurement, in `docs/research/spikes.md`'s spirit
 
 Three things to measure, all on real use over a fixed window of at least a week,
 all reported as counts with the denominator stated:
@@ -422,7 +422,7 @@ Blocking spikes, before M0 is planned rather than after:
   inside the images rather than from memory of the documentation.
 - Does `container run` take a second `--volume` with `:ro` alongside the session
   directory mount, with saint's exact argument set? `:ro` enforcement is verified
-  in `SPIKES.md`; this specific combination is not.
+  in `docs/research/spikes.md`; this specific combination is not.
 
 ## 8. What I would not build
 
