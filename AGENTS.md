@@ -24,8 +24,10 @@ Full text: [`docs/design/principles.md`](docs/design/principles.md).
 - **Secure and seamless at once.** When the safe path and the easy path conflict, say so and let the user choose.
 - **Never show an invented number.** An unknown is `unknown`.
 - **Nothing machine-local in code or tests.** Discover at runtime, compare minimums, use `t.TempDir()`.
-- **State blast radius in the UI, not just in docs.**
+- **State blast radius where the choice is made, not just in docs.**
 - **Authenticate once per install, never per session.**
+- **One signal, one meaning.** herdr's `blocked` means a person has to act, and nothing else.
+- **Quiet is the default.** Report on a change of state, never on a timer.
 - **Say which measurement a number is.**
 - **Every quit path must work.**
 
@@ -63,6 +65,5 @@ remember.
 | What saint does and does not protect | [`SECURITY.md`](SECURITY.md) |
 | Configuration, billing modes, known limits | [`docs/guide/configuration.md`](docs/guide/configuration.md) |
 | Known gaps and what would close them | [`docs/plans/tech-debt.md`](docs/plans/tech-debt.md) |
-| Design proposals, not decisions | [`docs/design/`](docs/design/) |
 | Reviewing a branch; checking docs against code | [`docs/agents/`](docs/agents/) |
 | Every document, what it decides, when it was checked | [`docs/index.md`](docs/index.md) |

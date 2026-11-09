@@ -181,6 +181,10 @@ agent that stops to ask before every edit inside its own sandbox is mostly
 friction. Use `saint new -ask` when the mounted contents matter more than the
 speed. herdr panes always skip prompts.
 
+saint does not accept Claude Code's bypass-permissions screen for you. The first
+time a session starts, Claude Code asks, and accepting it is your statement that
+the microVM, not the agent's prompts, is the boundary.
+
 The images pin exact agent versions, and sessions run with
 `DISABLE_UPDATES=1` so an agent cannot fetch and execute a new version of
 itself inside the sandbox. Update a runtime by bumping the version in
