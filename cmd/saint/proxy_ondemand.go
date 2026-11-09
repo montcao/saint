@@ -106,7 +106,7 @@ func newProxyStarter(st *store.Store, containerPath string) proxyStarter {
 			if err != nil {
 				return "", err
 			}
-			return net.JoinHostPort(host, strconv.Itoa(cfg.ProxyPortOrDefault())), nil
+			return net.JoinHostPort(host, strconv.Itoa(cfg.ProxyPort)), nil
 		},
 		probe:   probeProxy,
 		spawn:   func() (<-chan error, error) { return spawnDetachedProxy(logPath) },

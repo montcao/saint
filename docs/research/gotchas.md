@@ -17,6 +17,10 @@ Do not rediscover these.
 - **The proxy cannot bind before the first container exists.** The bridge
   address appears only while a container is attached, so start the container,
   then the proxy (`docs/research/spikes.md`).
+- **A fresh state directory needs a local port.** The first run binds
+  `127.0.0.1:0` to choose the proxy port, so in an agent sandbox that forbids
+  local binding even `saint proxy log` fails with `choose proxy port: ...
+  operation not permitted`. Allow local binding, or run it outside the sandbox.
 - **saint refuses to mount `/tmp` and `/private/tmp`.** A scratch project for a
   test has to live under a mount root, such as a folder in your home directory.
 - **commitlint rejects any capital in the subject**, including in a word like

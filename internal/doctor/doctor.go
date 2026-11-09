@@ -284,7 +284,7 @@ func (d *Doctor) proxyResults(ctx context.Context, cfg store.Config, cfgErr erro
 	}
 
 	network := cfg.ProxyNetworkOrDefault()
-	port := cfg.ProxyPortOrDefault()
+	port := cfg.ProxyPort
 
 	gateway, gwErr := sandbox.GatewayAddr(ctx, d.ContainerPath, network)
 	results := []Result{{

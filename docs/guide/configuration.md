@@ -4,6 +4,13 @@ Reference for what the [README](../../README.md) leaves out: who pays for a
 session, where secrets live, what a session can see, and what the token counts
 mean. Settings live in `~/.saint/config.json`.
 
+`~/.saint` is the state directory: config, sessions, tokens and the request
+journal. Set `SAINT_HOME` to an absolute path to use another one, for example
+to run a second copy of saint from another checkout without either touching
+the other's sessions or proxy. Set it in the environment herdr is started
+from, so the panes and the proxy they start all see it. Paths below that say
+`~/.saint` mean the state directory.
+
 ## Known limits
 
 - No signed releases, so `make allow-firewall` is a required install step.
@@ -130,10 +137,14 @@ running in the background; its output is in `~/.saint/proxy.out`. If it stops,
 containers keep running but their agents lose API access until a pane or
 `saint attach` starts it again. `saint proxy` runs it in the foreground.
 
+Each session's guest is given the proxy's address, port included, when the
+session is created, so changing `proxy_port` strands existing sessions until
+they are recreated.
+
 | Key | Default | Meaning |
 |---|---|---|
 | `proxy_bind` | `auto` | discovers the container bridge gateway at runtime; a guest cannot reach host loopback |
-| `proxy_port` | `8787` | listen port |
+| `proxy_port` | chosen once per state directory | listen port; a free port is picked on first run and written here, and a value you set is kept |
 | `proxy_network` | `default` | network whose gateway is discovered |
 
 ## Sessions

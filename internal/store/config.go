@@ -208,11 +208,6 @@ const (
 	CredentialOpenAI             = "openai"
 	CredentialClaudeSubscription = "claude_subscription"
 
-	// DefaultProxyPort is the fallback when a config omits proxy_port. Without
-	// it, a config written without the field would bind port 0 - an ephemeral
-	// port nothing can find.
-	DefaultProxyPort = 8787
-
 	// DefaultProxyLogMaxBytes and DefaultProxyLogKeepFiles bound the request
 	// journal at roughly 20 MiB. The predecessor of that journal was an
 	// unrotated ~/.saint/saint.log that grew until the user noticed, so the
@@ -246,14 +241,6 @@ func (c Config) ProxyBindIsAuto() bool {
 func (c Config) ProxyBindIsLoopback() bool {
 	host := strings.ToLower(c.ProxyBindHost())
 	return host == ProxyBindLoopback || host == "localhost" || host == "::1"
-}
-
-// ProxyPortOrDefault returns the configured port, falling back when unset.
-func (c Config) ProxyPortOrDefault() int {
-	if c.ProxyPort <= 0 || c.ProxyPort > 65535 {
-		return DefaultProxyPort
-	}
-	return c.ProxyPort
 }
 
 // ProxyLogRequestsOrDefault reports whether per-request journal records are on.
@@ -413,7 +400,6 @@ func DefaultConfig() Config {
 		DefaultMemoryGB:    2,
 		DefaultCPUs:        2,
 		NonPrimaryReadOnly: true,
-		ProxyPort:          DefaultProxyPort,
 		ProxyBind:          DefaultProxyBind,
 		ProxyAuth:          DefaultProxyAuth,
 		ProxyNetwork:       sandbox.DefaultNetwork,
