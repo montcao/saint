@@ -17,7 +17,7 @@ marked *checked* fail `make check` when broken (`internal/archtest`).
 | `internal/egress` | carrying "may this session reach this host?" from the proxy to the interface, so neither imports the other |
 | `internal/keychain` | the macOS `security(1)` CLI; secrets go to it on stdin, never in argv |
 | `internal/doctor` | `saint doctor`: checks of the host, the runtime, credentials and the proxy, with a fix where one is a command |
-| `cmd/saint` | the binary: CLI entry points, wiring, and the proxy's lifecycle inside the TUI process |
+| `cmd/saint` | the binary: CLI entry points, wiring, the proxy's lifecycle inside the TUI process, and the herdr plugin's action and pane entrypoints (`herdr.go`, with the manifest in `herdr-plugin.toml`) |
 | `internal/archtest` | structural tests for the boundaries below |
 | `scripts/docs-check` | `make docs-check`: documents that point at files, targets or documents that do not exist |
 

@@ -104,7 +104,38 @@ saint            # the TUI
 saint ls         # plain-text session list
 saint doctor     # check the setup
 saint proxy log  # what the agents called, most recent first
+saint stop <session>  # stop a session's microVM, keep the session
+saint rm <session>    # delete a session; your repositories are not touched
 SAINT_DEBUG=1 saint   # verbose logging to ~/.saint/saint.log
+```
+
+## In herdr
+
+saint is also a [herdr](https://herdr.dev) plugin. Its actions open a pane
+beside the focused one whose agent already runs in a microVM, mounted on the
+focused pane's folder.
+
+```bash
+make build
+herdr plugin link "$PWD"                      # from this checkout
+herdr plugin action invoke saint.new          # Claude
+herdr plugin action invoke saint.new-codex    # Codex
+```
+
+Bind an action to a key with a `[[keys.command]]` entry of
+`type = "plugin_action"` in herdr's `config.toml`.
+
+The first pane starts the credential proxy (`saint proxy`), detached so it
+outlives the pane, and every later pane reuses it. If Apple's container service
+is stopped, the pane asks before starting it. Closing a pane ends only its
+attach: the agent keeps running in its microVM. herdr shows the agent's state
+because the pane sets `HERDR_AGENT` on the host side, where herdr reads it.
+
+To reopen a session in a pane:
+
+```bash
+herdr plugin pane open --plugin saint --entrypoint session \
+  --env SAINT_SESSION=<session> --env HERDR_AGENT=claude
 ```
 
 ## Keys

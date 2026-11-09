@@ -1,0 +1,30 @@
+id = "saint"
+name = "saint"
+version = "0.1.0"
+min_herdr_version = "0.9.5"
+description = "Open panes whose agent runs in an Apple container microVM, with credentials held by a host proxy."
+
+# herdr runs this once after `herdr plugin install`. A linked checkout needs
+# `make build` run by hand.
+[[build]]
+command = ["make", "build"]
+
+[[actions]]
+id = "new"
+title = "saint: new sandboxed Claude pane"
+contexts = ["workspace"]
+command = ["./saint", "herdr", "open", "claude"]
+
+[[actions]]
+id = "new-codex"
+title = "saint: new sandboxed Codex pane"
+contexts = ["workspace"]
+command = ["./saint", "herdr", "open", "codex"]
+
+# Opened by the actions above with SAINT_REPO and SAINT_RUNTIME set, or with
+# SAINT_SESSION set to reattach to an existing session.
+[[panes]]
+id = "session"
+title = "saint"
+placement = "split"
+command = ["./saint", "herdr", "pane"]
