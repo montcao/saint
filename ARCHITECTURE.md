@@ -23,7 +23,7 @@ marked *checked* fail `make check` when broken (`internal/archtest`).
 
 `docs/research/spikes.md` records what was measured rather than assumed, and on which runtime.
 When a runtime behaviour surprises you, measure it and add a section.
-`docs/design/` holds design notes that are proposals, not decisions.
+`docs/design/principles.md` holds what saint is for and the rules that follow.
 
 ## Boundaries
 

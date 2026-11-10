@@ -33,12 +33,25 @@ IP addresses, no exact host versions as gates. Discover at runtime, compare
 minimums, and use `t.TempDir()`. Observations from one host belong in prose,
 labelled as observations.
 
-**State blast radius in the UI, not just in docs.** What a compromised guest
-holds, and for how long. The header always says which account a session bills;
-the sidebar says which credential it carries.
+**State blast radius where the choice is made, not just in docs.** What a
+compromised guest holds, and for how long. `saint auth` and `saint doctor` say
+which account new sessions bill and which credential they carry, and a pane
+says it before the agent starts.
 
 **Authenticate once per install, never per session.** Sessions get a random
 per-session token for attribution; they never ask the user for anything.
+
+**One signal, one meaning.** saint has no screen of its own; what it shows
+goes through herdr. herdr's `blocked` state means a person has to act, and saint
+uses it for nothing else: a pending egress question is `blocked`, a slow
+request is not. A state is always said in words, never carried by colour
+alone.
+
+**Quiet is the default.** saint speaks when something needs a person or has
+changed, and is otherwise silent. It reports to herdr on a change of state,
+never on a timer; it sends no notification for routine events; and an idle
+saint polls nothing, so it wakes up for nothing. A signal that is always
+present is wallpaper within a day.
 
 **Say which measurement a number is.** saint counts what crossed the proxy; an
 agent counts its own conversation, and the two never agree. A figure that
