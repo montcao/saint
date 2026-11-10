@@ -29,8 +29,11 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
 
       # The title arrives through the environment, never interpolated into the
-      # script, so a title containing shell syntax is only ever text.
+      # script, so a title containing shell syntax is only ever text. It is
+      # linted with the " (#N)" suffix a squash merge appends, because that is
+      # the header that lands on main and the one the length limit applies to.
       - name: Lint pull request title
-        run: printf '%s\n' "$TITLE" | npx --yes -p @commitlint/cli@21.2.4 commitlint
+        run: printf '%s (#%s)\n' "$TITLE" "$NUMBER" | npx --yes -p @commitlint/cli@21.2.4 commitlint
         env:
           TITLE: ${{ github.event.pull_request.title }}
+          NUMBER: ${{ github.event.pull_request.number }}

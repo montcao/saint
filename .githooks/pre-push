@@ -7,15 +7,13 @@ set -eu
 zero=0000000000000000000000000000000000000000
 while read -r local_ref local_sha remote_ref remote_sha; do
 	[ "$local_sha" = "$zero" ] && continue # deleting a branch
-	if [ "$remote_sha" = "$zero" ]; then
-		# A new branch: lint what it adds on top of main.
-		base=$(git merge-base "$local_sha" origin/main 2>/dev/null || true)
-	else
-		base=$remote_sha
-	fi
+	# Lint what the branch adds on top of main. The old remote head is not a
+	# usable base: after a rebase it is no longer an ancestor, and the range
+	# from it would take in commits that are already on main.
+	base=$(git merge-base "$local_sha" origin/main 2>/dev/null || true)
 	# Nothing new on this ref (already pushed, or a re-push of the same
 	# commit): commitlint rejects an empty range, and there is nothing to lint.
-	if [ -n "$base" ] && [ "$base" != "$local_sha" ]; then
+	if [ -n "$base" ] && [ "$base" != "$local_sha" ] && [ "$remote_sha" != "$local_sha" ]; then
 		make --no-print-directory -s commitlint-range FROM="$base" TO="$local_sha"
 	fi
 done
