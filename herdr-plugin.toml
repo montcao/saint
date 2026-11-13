@@ -28,3 +28,12 @@ id = "session"
 title = "saint"
 placement = "split"
 command = ["./saint", "herdr", "pane"]
+
+# Opened by the proxy as an overlay on a session's pane, with
+# SAINT_EGRESS_SESSION set, when that session asks to reach a host nobody has
+# ruled on. It asks "Allow always" or "Deny" and exits when nothing is pending.
+[[panes]]
+id = "egress"
+title = "saint: network access"
+placement = "overlay"
+command = ["./saint", "herdr", "egress"]

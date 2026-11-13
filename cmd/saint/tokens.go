@@ -27,7 +27,12 @@ type tokenRegistry struct {
 
 	authMu       sync.Mutex
 	authCache    map[string]string
+	netCache     map[string]string
 	authLoadedAt time.Time
+
+	// legacyNetwork is the shared network a session with no network of its
+	// own runs on.
+	legacyNetwork string
 }
 
 func newTokenRegistry(st *store.Store) *tokenRegistry {
@@ -56,36 +61,67 @@ func (t *tokenRegistry) Auth(sessionID string) string {
 	if sessionID == "" {
 		return store.ProxyAuthKey
 	}
-	if mode, ok := t.authSnapshot()[sessionID]; ok {
+	modes, _ := t.authSnapshot()
+	if mode, ok := modes[sessionID]; ok {
 		return mode
 	}
 	// Unknown sessions get the mode that injects nothing extra into the guest.
 	return store.ProxyAuthKey
 }
 
-func (t *tokenRegistry) authSnapshot() map[string]string {
+// invalidate drops the cached tokens and session records, so a session created
+// a moment ago authenticates on its first request.
+func (t *tokenRegistry) invalidate() {
+	t.mu.Lock()
+	t.cache = nil
+	t.mu.Unlock()
+	t.authMu.Lock()
+	t.authCache = nil
+	t.netCache = nil
+	t.authMu.Unlock()
+}
+
+// Network reports the container network a session runs on, which decides the
+// one listener its token is accepted on. An unknown session has none, so it
+// matches no listener.
+func (t *tokenRegistry) Network(sessionID string) string {
+	_, networks := t.authSnapshot()
+	network, ok := networks[sessionID]
+	if !ok {
+		return ""
+	}
+	if network == "" {
+		return t.legacyNetwork
+	}
+	return network
+}
+
+func (t *tokenRegistry) authSnapshot() (modes, networks map[string]string) {
 	t.authMu.Lock()
 	defer t.authMu.Unlock()
 
 	now := t.now()
 	if t.authCache != nil && now.Sub(t.authLoadedAt) < t.interval {
-		return t.authCache
+		return t.authCache, t.netCache
 	}
 
 	sessions, err := t.store.LoadSessions()
 	if err != nil {
 		if t.authCache != nil {
-			return t.authCache
+			return t.authCache, t.netCache
 		}
-		return map[string]string{}
+		return map[string]string{}, map[string]string{}
 	}
-	modes := make(map[string]string, len(sessions))
+	modes = make(map[string]string, len(sessions))
+	networks = make(map[string]string, len(sessions))
 	for _, session := range sessions {
 		modes[session.ID] = session.ProxyAuthOrDefault()
+		networks[session.ID] = session.Network
 	}
 	t.authCache = modes
+	t.netCache = networks
 	t.authLoadedAt = now
-	return modes
+	return modes, networks
 }
 
 func (t *tokenRegistry) snapshot() map[string]string {

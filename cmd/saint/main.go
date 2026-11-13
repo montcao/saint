@@ -7,16 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"net"
-	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"golang.org/x/term"
@@ -29,7 +24,6 @@ import (
 	"github.com/montcao/saint/internal/sandbox"
 	"github.com/montcao/saint/internal/session"
 	"github.com/montcao/saint/internal/store"
-	"github.com/montcao/saint/internal/usage"
 )
 
 // systemSecurityPath is pinned rather than resolved through PATH: a `security`
@@ -122,12 +116,20 @@ func run(ctx context.Context, args []string) error {
 	// proxy URL and starts the proxy. An unset ProxyURL would leave the
 	// guest talking to the provider directly with whatever it can find.
 	deps := sessionDeps{
-		svc:          svc,
-		ensureProxy:  newProxyStarter(st, containerPath).ensure,
-		startService: sb.StartSystem,
-		guestURL: func(ctx context.Context) (string, error) {
-			return guestProxyURL(ctx, st, containerPath)
+		svc:         svc,
+		ensureProxy: newProxyStarter(st).ensure,
+		listen: func(ctx context.Context, sessionID string) (string, error) {
+			resp, err := controlCall(ctx, st.Paths().ControlSocket, controlRequest{Op: controlOpListen, Session: sessionID})
+			return resp.Addr, err
 		},
+		probe:        probeProxy,
+		reachTimeout: proxyReachTimeout,
+		startService: sb.StartSystem,
+		checkService: func(ctx context.Context) error {
+			_, err := sb.List(ctx)
+			return err
+		},
+		pane: currentHerdrPane,
 	}
 
 	if len(args) == 0 || args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
@@ -159,6 +161,8 @@ func run(ctx context.Context, args []string) error {
 		return runRemove(ctx, svc, args[1:])
 	case "herdr":
 		return runHerdr(ctx, deps, args[1:])
+	case "allow":
+		return runAllow(st, args[1:], os.Stdout)
 	default:
 		return fmt.Errorf("unknown subcommand %q", args[0])
 	}
@@ -189,8 +193,10 @@ Usage:
   saint auth                 show and set credentials
   saint proxy                run the credential proxy in the foreground
   saint proxy log            what the agents called, most recent first
+  saint allow [<host>]       list, or save, hosts every session may reach
+  saint allow -rm <host>     remove a saved host
   saint doctor               check the host, runtime, credentials and proxy
-  saint herdr open|pane      herdr plugin entrypoints
+  saint herdr open|pane|egress   herdr plugin entrypoints
 `
 
 func runDoctor(ctx context.Context, st *store.Store, kc *keychain.Keychain, containerPath, gitPath string, args []string) error {
@@ -211,6 +217,10 @@ func runDoctor(ctx context.Context, st *store.Store, kc *keychain.Keychain, cont
 		Store:         st,
 		Keychain:      kc,
 		RepoRoot:      repoRoot,
+		ProxyStatus: func(ctx context.Context) ([]string, error) {
+			resp, err := controlCall(ctx, st.Paths().ControlSocket, controlRequest{Op: controlOpPing})
+			return resp.Listeners, err
+		},
 	}
 	results, err := doc.Run(ctx)
 	if err != nil {
@@ -317,184 +327,6 @@ func usageLine(ev proxy.UsageEvent) string {
 		ev.Usage.InputTokens, ev.Usage.OutputTokens,
 		ev.Usage.CacheReadTokens, ev.Usage.CacheCreationTokens,
 	)
-}
-
-// newProxyServer builds the proxy listener. There is exactly one construction
-// path and one set of timeouts, whoever starts the proxy.
-//
-// The returned journal belongs to the caller: it owns a goroutine and an open
-// file, and must be closed when the server stops.
-// proxyRuntime is everything a caller needs to run the local proxy and stop it
-// again. It is a struct rather than four return values because stopping the
-// proxy correctly needs more than the http.Server: hijacked tunnels and the
-// journal are not the server's to close.
-type proxyRuntime struct {
-	Server  *http.Server
-	Addr    string
-	Journal *journal
-	Proxy   *proxy.Proxy
-}
-
-func newProxyServer(ctx context.Context, st *store.Store, kc *keychain.Keychain, containerPath string, logger *debugLogger, meter *usage.Meter) (proxyRuntime, error) {
-	cfg, err := st.EnsureConfig()
-	if err != nil {
-		return proxyRuntime{}, err
-	}
-	anthropicURL, err := url.Parse("https://api.anthropic.com")
-	if err != nil {
-		return proxyRuntime{}, err
-	}
-	openAIURL, err := url.Parse("https://api.openai.com")
-	if err != nil {
-		return proxyRuntime{}, err
-	}
-
-	anthropicSource, err := credentialSource(cfg, store.CredentialAnthropic, string(keychain.ProviderAnthropic), kc)
-	if err != nil {
-		return proxyRuntime{}, fmt.Errorf("anthropic credential: %w", err)
-	}
-	openAISource, err := credentialSource(cfg, store.CredentialOpenAI, string(keychain.ProviderOpenAI), kc)
-	if err != nil {
-		return proxyRuntime{}, fmt.Errorf("openai credential: %w", err)
-	}
-
-	jr := newJournal(
-		st.Paths().ProxyLogPath,
-		cfg.ProxyLogMaxBytesOrDefault(),
-		cfg.ProxyLogKeepFilesOrDefault(),
-	)
-
-	tokens := newTokenRegistry(st)
-	handler, err := proxy.New(proxy.Config{
-		AnthropicURL: anthropicURL,
-		OpenAIURL:    openAIURL,
-		AnthropicKey: anthropicSource.Get,
-		OpenAIKey:    openAISource.Get,
-		TokenLookup:  tokens.Lookup,
-		SessionAuth:  proxyAuthMode(tokens),
-		Logf:         logger.Printf,
-		// Forwarding and the guest's proxy variables are the same switch. A
-		// guest pointed at a proxy that will not forward gets 405 on every git
-		// clone and npm install; a proxy that forwards for a guest that was
-		// never told about it does nothing at all. Neither half is useful
-		// alone, so neither has its own setting.
-		Forward: guestEgressForward(cfg),
-
-		// Begin and Record are nil-safe; `saint proxy` passes no meter.
-		OnRequestStart: meter.Begin,
-
-		OnUsage: func(ev proxy.UsageEvent) {
-			meter.Record(ev)
-			// This runs on the goroutine copying an agent's response. record
-			// queues and returns; it never touches the disk here.
-			jr.record(usageRecord(ev, time.Now()))
-			logger.Printf("%s", usageLine(ev))
-		},
-	})
-	if err != nil {
-		jr.Close()
-		return proxyRuntime{}, err
-	}
-
-	bindHost, err := resolveProxyBindHost(ctx, cfg, containerPath)
-	if err != nil {
-		jr.Close()
-		return proxyRuntime{}, err
-	}
-
-	// Only the request records cost anything on the request path, so the
-	// wrapper exists only when they are wanted.
-	var served http.Handler = handler
-	if cfg.ProxyLogRequestsOrDefault() {
-		served = newJournalHandler(handler, jr, tokens)
-	}
-
-	addr := net.JoinHostPort(bindHost, strconv.Itoa(cfg.ProxyPort))
-	server := &http.Server{
-		Addr:    addr,
-		Handler: served,
-
-		// ReadHeaderTimeout bounds Slowloris: a client cannot hold a connection
-		// open indefinitely by dribbling out request headers.
-		ReadHeaderTimeout: 10 * time.Second,
-
-		// WriteTimeout is deliberately left at 0. Claude Code streams SSE
-		// responses that can run for many minutes; any write deadline would
-		// truncate a long response mid-stream. Do not "fix" this by setting one.
-		WriteTimeout: 0,
-	}
-	return proxyRuntime{Server: server, Addr: addr, Journal: jr, Proxy: handler}, nil
-}
-
-// Shutdown stops the proxy in the order the parts actually depend on.
-//
-// http.Server.Shutdown does not touch hijacked connections, which is every
-// forward-proxy tunnel - Go's documentation says so directly. Without the
-// second step a tunnel and its goroutine outlive the server that made them, and
-// saint appears to have exited while a guest still has an open socket through
-// it. The journal closes last so records queued by requests that were still
-// finishing are written rather than dropped.
-func (r proxyRuntime) Shutdown(ctx context.Context) error {
-	var errs []error
-	if r.Server != nil {
-		errs = append(errs, r.Server.Shutdown(ctx))
-	}
-	errs = append(errs, r.Proxy.CloseTunnels())
-	if r.Journal != nil {
-		r.Journal.Close()
-	}
-	return errors.Join(errs...)
-}
-
-// guestEgressForward returns the forward-proxy configuration, or nil when guest
-// egress proxying is off - which is the default, and which leaves the proxy
-// answering nothing but the two provider APIs.
-//
-// The defaults here are the restrictive ones on purpose. Anonymous forwarding
-// is refused because this listener binds the container bridge, so every
-// container on that bridge can reach it, not only the ones saint started; a
-// guest identifies itself with the session token it already has. Loopback and
-// link-local stay denied because a container cannot reach the host's 127.0.0.1
-// on its own, and tunnelling there would hand a guest every unauthenticated
-// service the developer runs locally, plus the 169.254.169.254 metadata
-// address.
-func guestEgressForward(cfg store.Config) *proxy.ForwardConfig {
-	if !cfg.ProxyGuestEgressOrDefault() {
-		return nil
-	}
-	return &proxy.ForwardConfig{}
-}
-
-func runProxy(ctx context.Context, st *store.Store, kc *keychain.Keychain, containerPath string, logger *debugLogger) error {
-	// Ctrl-C previously severed in-flight SSE streams; shut down gracefully.
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	// Nothing in this process reads live totals, so usage goes to the journal
-	// only. Record is nil-safe.
-	rt, err := newProxyServer(ctx, st, kc, containerPath, logger, nil)
-	if err != nil {
-		return err
-	}
-	defer rt.Journal.Close()
-
-	errc := make(chan error, 1)
-	go func() {
-		fmt.Println("listening on", rt.Addr)
-		errc <- rt.Server.ListenAndServe()
-	}()
-
-	select {
-	case err := <-errc:
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
-		return err
-	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		return rt.Shutdown(shutdownCtx)
-	}
 }
 
 func runKeychain(ctx context.Context, kc *keychain.Keychain, args []string) error {
@@ -623,22 +455,6 @@ func (d *debugLogger) Printf(format string, args ...any) {
 		line += "\n"
 	}
 	_, _ = f.WriteString(line)
-}
-
-// guestProxyURL is the address a *guest* uses to reach the proxy. It always uses
-// the discovered bridge gateway, never the bind host: a user may legitimately
-// pin ProxyBind to 0.0.0.0 or a specific interface, and neither of those is a
-// routable destination from inside a container.
-func guestProxyURL(ctx context.Context, st *store.Store, containerPath string) (string, error) {
-	cfg, err := st.EnsureConfig()
-	if err != nil {
-		return "", err
-	}
-	gateway, err := sandbox.GatewayAddr(ctx, containerPath, cfg.ProxyNetworkOrDefault())
-	if err != nil {
-		return "", err
-	}
-	return "http://" + net.JoinHostPort(gateway, strconv.Itoa(cfg.ProxyPort)), nil
 }
 
 // probeProxy reports whether something is already accepting connections at addr.

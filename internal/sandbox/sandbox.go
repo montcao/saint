@@ -70,14 +70,19 @@ type CreateOptions struct {
 	ProxyToken string
 
 	// ProxyEgress points the guest's HTTP_PROXY and HTTPS_PROXY at saint, so
-	// the session's git, npm and curl traffic crosses the host's forward proxy
-	// and is recorded there rather than leaving the microVM unobserved.
+	// the session's git, npm and curl traffic crosses the host's forward
+	// proxy. A session on its own internal network has no other way out, so
+	// every new session sets it.
 	//
 	// False must set none of those variables. A guest pointed at a proxy that
 	// is not accepting forward traffic does not degrade - every clone and every
 	// install fails at once - so the off state has to be the untouched
 	// environment, never a proxy URL that happens to be refused.
 	ProxyEgress bool
+
+	// Network is the container network to run on. Empty leaves the runtime's
+	// default network, with its ordinary internet access.
+	Network string
 
 	// SkipPermissions runs the agent without its approval prompts.
 	//
@@ -115,6 +120,11 @@ var ErrRuntimeBlocked = errors.New("runtime workflow blocked by spike findings")
 
 type Sandbox interface {
 	Create(ctx context.Context, name string, rt Runtime, repos []Repo, sessionDir, proxyURL string, opts CreateOptions) error
+	// CreateNetwork creates (or reuses) a session's internal network and
+	// returns the host's address on it.
+	CreateNetwork(ctx context.Context, name string) (gateway string, err error)
+	// RemoveNetwork deletes a session's network; an absent one is not an error.
+	RemoveNetwork(ctx context.Context, name string) error
 	List(ctx context.Context) ([]Info, error)
 	Stop(ctx context.Context, name string) error
 	Start(ctx context.Context, name string) error
