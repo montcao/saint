@@ -185,4 +185,12 @@ var defaultAllowedHosts = []string{
 	"sum.golang.org",
 	"crates.io",
 	"static.crates.io",
+
+	// Claude Code reaches these on its first start: downloads for its own
+	// updater, and its third-party logging intake for metrics and error
+	// reports. Without them every new session is asked about both before the
+	// person has typed anything. DISABLE_TELEMETRY, DISABLE_ERROR_REPORTING
+	// and DISABLE_AUTOUPDATER in the guest turn the traffic off instead.
+	"downloads.claude.ai",
+	"http-intake.logs.us5.datadoghq.com",
 }

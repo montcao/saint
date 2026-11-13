@@ -38,7 +38,7 @@ func (f *fakeHerdr) run(_ context.Context, pane store.HerdrPane, args ...string)
 	if len(args) > 2 && args[0] == "plugin" && f.prompt != nil {
 		server, client := net.Pipe()
 		sessionID := strings.TrimPrefix(args[slices.Index(args, "--env")+1], envEgressSession+"=")
-		go f.prompts.serveOverlay(sessionID, newControlConn(server))
+		go f.prompts.servePrompt(sessionID, newControlConn(server))
 		go func() {
 			defer client.Close()
 			f.prompt(newControlConn(client))
@@ -134,8 +134,7 @@ func TestAskingInHerdrAllowsAndSaves(t *testing.T) {
 	calls := fake.commands()
 	want := [][]string{
 		{"/herdr/one.sock", "pane", "report-agent", "w1:p2", "--source", "saint", "--agent", "codex", "--state", "blocked", "--message", "saint: allow network access to paste.example?"},
-		{"/herdr/one.sock", "agent", "focus", "w1:p2"},
-		{"/herdr/one.sock", "plugin", "pane", "open", "--plugin", "saint", "--entrypoint", "egress", "--placement", "overlay", "--focus", "--env", "SAINT_EGRESS_SESSION=s1", "--env", "SAINT_HOME=/state"},
+		{"/herdr/one.sock", "plugin", "pane", "open", "--plugin", "saint", "--entrypoint", "egress", "--placement", "split", "--direction", "down", "--target-pane", "w1:p2", "--no-focus", "--env", "SAINT_EGRESS_SESSION=s1", "--env", "SAINT_HOME=/state"},
 		{"/herdr/one.sock", "pane", "release-agent", "w1:p2", "--source", "saint", "--agent", "codex"},
 	}
 	if len(calls) != len(want) {

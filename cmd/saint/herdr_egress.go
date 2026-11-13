@@ -13,10 +13,10 @@ import (
 	"golang.org/x/term"
 )
 
-// runHerdrEgress is the `egress` plugin pane: an overlay the proxy opens on a
+// runHerdrEgress is the `egress` plugin pane: a split the proxy opens beside a
 // session's pane when that session asks to reach a host nobody has ruled on.
 // It shows each pending host in turn, sends the answer, and exits when nothing
-// is left, which closes the overlay.
+// is left, which closes the pane.
 //
 // Every way out of it is an answer: Esc, q, Ctrl-C and closing the pane all
 // deny, and so does the proxy's timeout.
@@ -41,8 +41,8 @@ func runHerdrEgress(socketPath string, in *os.File, out io.Writer) error {
 }
 
 // egressArmDelay is how long after a question is drawn a key starts to
-// count. Opening the prompt takes focus from wherever the person was typing,
-// and a keystroke meant for that pane must not answer a question nobody read.
+// count. The prompt opens without focus, but a person who clicks into it as it
+// appears must still see the question before a key answers it.
 const egressArmDelay = 750 * time.Millisecond
 
 func dialEgress(socketPath, sessionID string) (*controlConn, error) {

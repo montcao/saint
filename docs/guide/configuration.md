@@ -22,9 +22,6 @@ from, so the panes and the proxy they start all see it. Paths below that say
   host is allowed for all of them, and saint cannot see what is sent to it.
 - A session started outside herdr (`saint new` in a plain terminal) has nobody
   to ask, so any host not already allowed is refused; use `saint allow`.
-- Claude Code reaches a few hosts of its own on first start
-  (`downloads.claude.ai`, a Datadog log intake), which are asked about like any
-  other.
 - Sessions created before each session had its own network keep the shared
   network, with open internet access, until recreated.
 - Which account subscription traffic bills is visible only on claude.ai.
@@ -177,11 +174,13 @@ Every host a session asks for is decided in this order:
 |---|---|
 | on `proxy_deny_hosts` | refused, never asked |
 | on `proxy_allow_hosts` (your saved hosts) | allowed |
-| shipped with saint: the provider APIs, GitHub, npm, PyPI, the Go proxy, crates.io | allowed |
+| shipped with saint: the provider APIs, GitHub, npm, PyPI, the Go proxy, crates.io, and Claude Code's updater and logging intake | allowed |
 | anything else | asked in the session's herdr pane |
 
 When a host is asked about, the session's pane is marked **blocked** with the
-host in the message, saint switches to that pane and opens a prompt over it:
+host in the message, and a prompt opens in a split below it. saint does not
+move you there: the blocked status is the signal, and focus stays where you
+left it.
 
 - **Allow always** lets the request through and saves the host for every
   session, running ones included.
@@ -189,8 +188,8 @@ host in the message, saint switches to that pane and opens a prompt over it:
 - Esc, `q` or closing the prompt deny. So does no answer within 20 seconds:
   the request fails with a 403 rather than hanging.
 
-Keys pressed in the moment after the prompt appears are ignored, so typing
-meant for another pane cannot answer it. Once nothing is waiting, the pane goes
+Keys pressed in the moment after the prompt appears are ignored, so a key
+pressed while clicking into it cannot answer a question you have not read. Once nothing is waiting, the pane goes
 back to herdr's own reading of the agent. A session with no herdr pane, or
 whose pane is gone, is refused at once and the reason is written to
 `~/.saint/proxy.out`.

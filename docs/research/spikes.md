@@ -173,8 +173,8 @@ of this repository). From inside a session's guest:
 | an unlisted host after the session's pane was closed | 403 in about 0.1 s |
 
 On its first start, Claude Code 2.1.247 asked to reach
-`http-intake.logs.us5.datadoghq.com` and `downloads.claude.ai`, neither of
-which is on the shipped allowlist, so a new install is asked about both.
+`http-intake.logs.us5.datadoghq.com` and `downloads.claude.ai`. Both are now
+on the shipped allowlist, so a new install is not asked about them.
 
 Not measured: whether `--dns` can point a guest at the host proxy for
 resolution.
@@ -260,8 +260,10 @@ passes an environment to that command, so one host wrapper can read
 **An overlay plugin pane opens only on the active pane.**
 `herdr plugin pane open --placement overlay --target-pane <pane>` fails with
 `overlay and popup plugin panes target the active pane`. `herdr agent focus
-<pane>` makes a pane active, switching workspace if needed, so saint focuses
-the session's pane and then opens the overlay. A plugin pane also receives
+<pane>` makes a pane active, but switches workspace under whoever is typing
+elsewhere. saint therefore opens the prompt as a split with `--target-pane`
+and `--no-focus`, and relies on the pane's blocked status to draw the person
+over. A plugin pane also receives
 `HERDR_PANE_ID`, `HERDR_SOCKET_PATH` and `HERDR_BIN_PATH`, which is how a
 session's pane is recorded for the proxy.
 

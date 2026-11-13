@@ -23,10 +23,10 @@ import (
 //
 //  1. marks the session's herdr pane blocked, with a message naming the host,
 //     so the person sees which session needs them;
-//  2. focuses that pane and opens an overlay plugin pane on it (`saint herdr
-//     egress`), which reads the session's questions from the control socket
-//     and sends back "Allow always" or "Deny". herdr opens an overlay only on
-//     the active pane, so the session's pane is made active first;
+//  2. opens a split plugin pane beside that pane without taking focus (`saint
+//     herdr egress`), which reads the session's questions from the control
+//     socket and sends back "Allow always" or "Deny". The blocked status is
+//     what draws the person over; the prompt never moves them;
 //  3. once nothing is pending, releases its report so herdr's own detection
 //     of the agent's state resumes.
 //
@@ -46,9 +46,9 @@ const (
 	// must not hold a guest's request past its own deadline.
 	herdrCallTimeout = 5 * time.Second
 
-	// overlayConnectTimeout is how long an opened prompt has to connect before
+	// promptConnectTimeout is how long an opened prompt has to connect before
 	// a new question may open another one.
-	overlayConnectTimeout = 10 * time.Second
+	promptConnectTimeout = 10 * time.Second
 
 	// herdrReportSource names saint as the reporter of a pane's agent state.
 	herdrReportSource = "saint"
@@ -83,10 +83,10 @@ type promptState struct {
 	agent string
 	// reported is the blocked message last sent; empty means not reported.
 	reported string
-	// overlayOpened is when a prompt was opened and has not connected yet.
-	overlayOpened time.Time
-	// overlayConnected means a prompt is showing this session's questions.
-	overlayConnected bool
+	// promptOpened is when a prompt was opened and has not connected yet.
+	promptOpened time.Time
+	// promptConnected means a prompt is showing this session's questions.
+	promptConnected bool
 }
 
 func newEgressPrompter(st *store.Store, logf func(string, ...any)) *egressPrompter {
@@ -210,22 +210,18 @@ func (p *egressPrompter) sync(sessionID string) {
 	}
 
 	p.mu.Lock()
-	open := !st.overlayConnected && (st.overlayOpened.IsZero() || p.now().Sub(st.overlayOpened) > overlayConnectTimeout)
+	open := !st.promptConnected && (st.promptOpened.IsZero() || p.now().Sub(st.promptOpened) > promptConnectTimeout)
 	if open {
-		st.overlayOpened = p.now()
+		st.promptOpened = p.now()
 	}
 	p.mu.Unlock()
 	if !open {
 		return
 	}
-	err := p.herdr(pane, focusPaneArgs(pane.PaneID)...)
-	if err == nil {
-		err = p.herdr(pane, overlayOpenArgs(sessionID, p.stateDir)...)
-	}
-	if err != nil {
+	if err := p.herdr(pane, promptOpenArgs(pane.PaneID, sessionID, p.stateDir)...); err != nil {
 		p.logf("session=%s herdr could not open the prompt: %v; denying its pending hosts", sessionID, err)
 		p.mu.Lock()
-		st.overlayOpened = time.Time{}
+		st.promptOpened = time.Time{}
 		p.mu.Unlock()
 		p.broker.DenyAll(sessionID)
 	}
@@ -237,10 +233,10 @@ func (p *egressPrompter) herdr(pane store.HerdrPane, args ...string) error {
 	return p.run(ctx, pane, args...)
 }
 
-// serveOverlay feeds one prompt pane its session's questions and applies its
+// servePrompt feeds one prompt pane its session's questions and applies its
 // answers. It returns when nothing is pending or the prompt goes away; a
 // prompt closed with questions still open has refused them.
-func (p *egressPrompter) serveOverlay(sessionID string, conn *controlConn) {
+func (p *egressPrompter) servePrompt(sessionID string, conn *controlConn) {
 	session, _ := p.session(sessionID)
 	name := session.Name
 	if name == "" {
@@ -249,8 +245,8 @@ func (p *egressPrompter) serveOverlay(sessionID string, conn *controlConn) {
 
 	p.mu.Lock()
 	st := p.stateFor(sessionID)
-	st.overlayConnected = true
-	st.overlayOpened = time.Time{}
+	st.promptConnected = true
+	st.promptOpened = time.Time{}
 	p.mu.Unlock()
 
 	answers := make(chan controlAnswer)
@@ -271,7 +267,7 @@ func (p *egressPrompter) serveOverlay(sessionID string, conn *controlConn) {
 
 	defer func() {
 		p.mu.Lock()
-		st.overlayConnected = false
+		st.promptConnected = false
 		p.mu.Unlock()
 		// Questions left open when the prompt goes away were seen and not
 		// allowed; nobody is left to answer them.
@@ -286,7 +282,7 @@ func (p *egressPrompter) serveOverlay(sessionID string, conn *controlConn) {
 			p.mu.Lock()
 			pending = p.broker.Pending(sessionID)
 			if len(pending) == 0 {
-				st.overlayConnected = false
+				st.promptConnected = false
 			}
 			p.mu.Unlock()
 			if len(pending) == 0 {
@@ -348,21 +344,19 @@ func releaseAgentArgs(paneID, agent string) []string {
 	return []string{"pane", "release-agent", paneID, "--source", herdrReportSource, "--agent", agent}
 }
 
-// focusPaneArgs makes the session's pane the active one, switching workspace
-// if need be. herdr 0.9.5 refuses --target-pane for an overlay ("overlay and
-// popup plugin panes target the active pane"), so this is how the prompt lands
-// on the session it is about.
-func focusPaneArgs(paneID string) []string {
-	return []string{"agent", "focus", paneID}
-}
-
-func overlayOpenArgs(sessionID, stateDir string) []string {
+// promptOpenArgs opens the prompt as a split beside the session's pane and
+// leaves focus where the person put it. An overlay would need the session's
+// pane made active first (herdr opens overlays only on the active pane), which
+// switches workspace under whoever is typing elsewhere.
+func promptOpenArgs(paneID, sessionID, stateDir string) []string {
 	return []string{
 		"plugin", "pane", "open",
 		"--plugin", herdrPluginID,
 		"--entrypoint", herdrEgressEntrypoint,
-		"--placement", "overlay",
-		"--focus",
+		"--placement", "split",
+		"--direction", "down",
+		"--target-pane", paneID,
+		"--no-focus",
 		"--env", envEgressSession + "=" + sessionID,
 		// The prompt is started by herdr, not by this process, so it is told
 		// which state directory - and so which proxy - it answers.

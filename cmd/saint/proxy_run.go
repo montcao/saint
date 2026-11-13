@@ -264,7 +264,7 @@ func runProxy(ctx context.Context, st *store.Store, kc *keychain.Keychain, conta
 	go serveControl(control, controlHandlers{
 		listeners: rt.Listeners.addrs,
 		listen:    rt.ListenSession,
-		egress:    rt.Prompter.serveOverlay,
+		egress:    rt.Prompter.servePrompt,
 	}, rt.Prompter.logf)
 	fmt.Println("control socket", st.Paths().ControlSocket)
 
