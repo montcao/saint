@@ -25,22 +25,21 @@ import (
 // through this file instead, which is how the host gets to see where an agent
 // went.
 //
-// What this observes is precisely "traffic that honours the proxy environment
-// variables". It is not all egress, it is not a list of everywhere a session
-// went, and nothing here may ever be named or described as if it were:
+// What this sees depends on where the guest runs.
 //
-//   - a statically linked binary, or one that reads no environment, ignores the
-//     variables and never appears here;
-//   - anything using raw sockets, its own DNS, or a non-HTTP protocol has
-//     nothing to send here;
-//   - a guest may unset the variables and keep working, because the container
-//     keeps ordinary internet access either way.
+// A session on its own internal network (every session saint creates) has no
+// route out and no resolver, measured in docs/research/spikes.md. Its only way
+// to any host is through this file, so the host policy below is a boundary:
+// what it refuses, the guest cannot reach.
 //
-// That last point is the important one. Nothing in this file is an egress
-// control. The optional policy below refuses what reaches this proxy; it does
-// not stop anything leaving the microVM, and a report built from this data
-// answers "where did the traffic that came through saint go", never "where did
-// this session go".
+// A guest on a network with ordinary internet access (a session created before
+// per-session networks) is different, and this file must never be described as
+// controlling it. There, only traffic that honours the proxy environment
+// variables arrives here: a statically linked binary, anything with its own DNS
+// or a non-HTTP protocol, and a guest that unsets the variables all leave
+// without passing through, and a report built from this data answers "where
+// did the traffic that came through saint go", never "where did this session
+// go".
 //
 // TLS is never intercepted. A CONNECT is tunnelled byte for byte, so what is
 // recorded is the host the guest named and how many bytes crossed - never a
@@ -247,9 +246,17 @@ func (p *Proxy) serveForward(w http.ResponseWriter, r *http.Request) {
 // It writes the refusal itself and reports whether the caller may continue.
 func (p *Proxy) authenticateForward(w http.ResponseWriter, r *http.Request) (string, bool) {
 	for _, candidate := range forwardTokens(r.Header) {
-		if sessionID, ok := p.cfg.TokenLookup(candidate); ok {
-			return sessionID, true
+		sessionID, ok := p.cfg.TokenLookup(candidate)
+		if !ok {
+			continue
 		}
+		if !inScope(r.Context(), sessionID) {
+			if p.cfg.Logf != nil {
+				p.cfg.Logf("session=%s forward refused: token presented on another session's network", sessionID)
+			}
+			continue
+		}
+		return sessionID, true
 	}
 	if p.forward.cfg.AllowAnonymous {
 		return "", true
