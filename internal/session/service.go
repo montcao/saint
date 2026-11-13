@@ -6,9 +6,11 @@ import (
 	"encoding/base32"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,11 +43,10 @@ type CreateRequest struct {
 }
 
 type Service struct {
-	Store    *store.Store
-	Sandbox  sandbox.Sandbox
-	Workdir  string
-	ProxyURL string
-	Now      func() time.Time
+	Store   *store.Store
+	Sandbox sandbox.Sandbox
+	Workdir string
+	Now     func() time.Time
 
 	// Credentials resolves a credential spec to a source. Nil means no
 	// subscription is available and every session falls back to key mode
@@ -152,6 +153,23 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (store.Session,
 		return store.Session{}, err
 	}
 
+	// The session's own internal network, and the proxy's address on it. The
+	// address is the guest's only way out, so it is both the provider base URL
+	// and the HTTP proxy.
+	session.Network = networkName(session.ID)
+	proxyURL, err := s.sessionProxyURL(ctx, cfg, session.Network)
+	if err != nil {
+		_ = s.Store.RemoveProxyToken(session.ID)
+		_ = os.RemoveAll(sessionDir)
+		return store.Session{}, err
+	}
+	discard := func() {
+		_ = s.Sandbox.Remove(ctx, containerName(session.ID))
+		_ = s.Sandbox.RemoveNetwork(ctx, session.Network)
+		_ = s.Store.RemoveProxyToken(session.ID)
+		_ = os.RemoveAll(sessionDir)
+	}
+
 	auth := s.resolveAuth(ctx, cfg, session.Runtime, req.Credential)
 	if auth.Warning != "" && s.Logf != nil {
 		s.Logf("session %s: %s", session.ID, auth.Warning)
@@ -174,34 +192,41 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (store.Session,
 		MemoryGB:          session.MemoryGB,
 		Name:              session.Name,
 		ProxyToken:        proxyToken,
-		ProxyEgress:       cfg.ProxyGuestEgressOrDefault(),
+		ProxyEgress:       true,
+		Network:           session.Network,
 		SkipPermissions:   req.SkipPermissions,
 		AuthMode:          auth.Mode,
 		SubscriptionToken: auth.Token,
 		SkillMounts:       skillMounts,
 	}
-	if err := s.Sandbox.Create(ctx, containerName(session.ID), session.Runtime, session.Repos, sessionDir, s.ProxyURL, createOpts); err != nil {
-		_ = os.RemoveAll(sessionDir)
+	if err := s.Sandbox.Create(ctx, containerName(session.ID), session.Runtime, session.Repos, sessionDir, proxyURL, createOpts); err != nil {
+		discard()
 		return store.Session{}, err
 	}
 
-	sessions, err := s.Store.LoadSessions()
-	if err != nil {
-		_ = s.Sandbox.Remove(ctx, containerName(session.ID))
-		_ = os.RemoveAll(sessionDir)
-		return store.Session{}, err
-	}
-	sessions = append(sessions, session)
-	if err := s.Store.SaveSessions(sessions); err != nil {
-		_ = s.Sandbox.Remove(ctx, containerName(session.ID))
-		_ = os.RemoveAll(sessionDir)
+	if err := s.Store.AddSession(session); err != nil {
+		discard()
 		return store.Session{}, err
 	}
 
 	return session, nil
 }
 
+// sessionProxyURL creates (or reuses) a session's network and returns the URL
+// its guest reaches the proxy at: that network's gateway and the state
+// directory's proxy port.
+func (s *Service) sessionProxyURL(ctx context.Context, cfg store.Config, network string) (string, error) {
+	gateway, err := s.Sandbox.CreateNetwork(ctx, network)
+	if err != nil {
+		return "", err
+	}
+	return "http://" + net.JoinHostPort(gateway, strconv.Itoa(cfg.ProxyPort)), nil
+}
+
 func (s *Service) Start(ctx context.Context, id string) error {
+	// A ready signal left by the last run would let the restarted guest start
+	// its agent before the proxy listens again.
+	_ = os.Remove(filepath.Join(s.Store.Paths().SessionsDir, id, sandbox.ProxyReadyFile))
 	if err := s.Sandbox.Start(ctx, containerName(id)); err != nil {
 		return err
 	}
@@ -215,20 +240,19 @@ func (s *Service) Stop(ctx context.Context, id string) error {
 func (s *Service) Delete(ctx context.Context, id string) error {
 	_ = s.Sandbox.Remove(ctx, containerName(id))
 
-	sessions, err := s.Store.LoadSessions()
+	removed, err := s.Store.RemoveSession(id)
 	if err != nil {
 		return err
 	}
 
-	filtered := sessions[:0]
-	for _, session := range sessions {
-		if session.ID == id {
-			continue
+	// The network goes after the container, because the runtime will not
+	// delete a network a container is attached to. A session from before
+	// per-session networks has none of its own to delete.
+	var networkErr error
+	if removed.Network != "" {
+		if err := s.Sandbox.RemoveNetwork(ctx, removed.Network); err != nil {
+			networkErr = fmt.Errorf("session removed, but its network %s remains (delete it with `container network delete %s`): %w", removed.Network, removed.Network, err)
 		}
-		filtered = append(filtered, session)
-	}
-	if err := s.Store.SaveSessions(filtered); err != nil {
-		return err
 	}
 
 	// The token lives outside the session directory now, so removing that
@@ -238,7 +262,10 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	}
 
 	sessionDir := filepath.Join(s.Store.Paths().SessionsDir, id)
-	return os.RemoveAll(sessionDir)
+	if err := os.RemoveAll(sessionDir); err != nil {
+		return err
+	}
+	return networkErr
 }
 
 func (s *Service) AttachCmd(id string) (*exec.Cmd, error) {
@@ -277,27 +304,27 @@ func (s *Service) ContainerName(id string) string {
 }
 
 func (s *Service) touch(id string) error {
-	sessions, err := s.Store.LoadSessions()
-	if err != nil {
-		return err
-	}
-
 	now := time.Now().UTC()
 	if s.Now != nil {
 		now = s.Now().UTC()
 	}
-
-	for i := range sessions {
-		if sessions[i].ID != id {
-			continue
-		}
-		sessions[i].LastRunAt = now
-		return s.Store.SaveSessions(sessions)
+	err := s.Store.UpdateSession(id, func(session *store.Session) {
+		session.LastRunAt = now
+	})
+	if errors.Is(err, store.ErrSessionNotFound) {
+		return fmt.Errorf("session %q not found", id)
 	}
-	return fmt.Errorf("session %q not found", id)
+	return err
 }
 
 func containerName(id string) string {
+	return "saint-" + id
+}
+
+// networkName is a session's own network. It shares the container's name,
+// which keeps the pair recognisable in `container network ls`; networks and
+// containers are separate namespaces in the runtime.
+func networkName(id string) string {
 	return "saint-" + id
 }
 

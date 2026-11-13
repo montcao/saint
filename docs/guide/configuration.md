@@ -1,8 +1,8 @@
 # Configuration
 
 Reference for what the [README](../../README.md) leaves out: who pays for a
-session, where secrets live, what a session can see, and what the token counts
-mean. Settings live in `~/.saint/config.json`.
+session, where secrets live, what a session can see and reach, and what the
+token counts mean. Settings live in `~/.saint/config.json`.
 
 `~/.saint` is the state directory: config, sessions, tokens and the request
 journal. Set `SAINT_HOME` to an absolute path to use another one, for example
@@ -18,8 +18,12 @@ from, so the panes and the proxy they start all see it. Paths below that say
   [What the token counts mean](#what-the-token-counts-mean)).
 - OpenAI context windows are unlisted, so Codex sessions show counts without a
   percentage.
-- Guest egress proxying is opt-in, and records traffic rather than blocking it.
-- Sessions sharing a container network can reach each other's microVMs.
+- Network decisions are per hostname, for every session at once: an allowed
+  host is allowed for all of them, and saint cannot see what is sent to it.
+- A session started outside herdr (`saint new` in a plain terminal) has nobody
+  to ask, so any host not already allowed is refused; use `saint allow`.
+- Sessions created before each session had its own network keep the shared
+  network, with open internet access, until recreated.
 - Which account subscription traffic bills is visible only on claude.ai.
 
 ## The API proxy
@@ -134,8 +138,15 @@ presenting the same token are both refused.
 
 The proxy starts on demand, the first time a session needs it, and keeps
 running in the background; its output is in `~/.saint/proxy.out`. If it stops,
-containers keep running but their agents lose API access until a pane or
-`saint attach` starts it again. `saint proxy` runs it in the foreground.
+containers keep running but their agents lose API and network access until a
+pane or `saint attach` starts it again. `saint proxy` runs it in the foreground.
+
+The proxy listens on each running session's own network, on that network's
+gateway, which exists only once the session's container runs. A pane (or
+`saint new` and `saint attach`) asks the running proxy to listen there through
+its control socket, `~/.saint/proxy.sock`; a proxy that restarts listens on
+every running session's network by itself. `saint doctor` asks the proxy which
+networks it serves and checks each can be reached.
 
 Each session's guest is given the proxy's address, port included, when the
 session is created, so changing `proxy_port` strands existing sessions until
@@ -143,9 +154,58 @@ they are recreated.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `proxy_bind` | `auto` | discovers the container bridge gateway at runtime; a guest cannot reach host loopback |
 | `proxy_port` | chosen once per state directory | listen port; a free port is picked on first run and written here, and a value you set is kept |
-| `proxy_network` | `default` | network whose gateway is discovered |
+| `proxy_bind` | `auto` | only for sessions from before per-session networks: where the proxy listens for them; `auto` is the gateway of `proxy_network` |
+| `proxy_network` | `default` | only for those older sessions: the shared network they run on |
+
+## Network access
+
+Each session runs on an internal container network of its own. Measured on
+Apple `container`, a guest there has no route out and no resolver
+([spikes](../research/spikes.md)): its only way to any host is saint's proxy,
+on its network's gateway. The guest's `HTTP_PROXY` and `HTTPS_PROXY` (both
+cases) point there, with the session token as the proxy password. Sessions
+cannot reach each other's microVMs, and a session's token is accepted only on
+its own network.
+
+Every host a session asks for is decided in this order:
+
+| | Result |
+|---|---|
+| on `proxy_deny_hosts` | refused, never asked |
+| on `proxy_allow_hosts` (your saved hosts) | allowed |
+| shipped with saint: the provider APIs, GitHub, npm, PyPI, the Go proxy, crates.io, and Claude Code's updater and logging intake | allowed |
+| anything else | asked in the session's herdr pane |
+
+When a host is asked about, the session's pane is marked **blocked** with the
+host in the message, and a prompt opens in a split below it. saint does not
+move you there: the blocked status is the signal, and focus stays where you
+left it.
+
+- **Allow always** lets the request through and saves the host for every
+  session, running ones included.
+- **Deny** refuses this request only. It is not remembered.
+- Esc, `q` or closing the prompt deny. So does no answer within 20 seconds:
+  the request fails with a 403 rather than hanging.
+
+Keys pressed in the moment after the prompt appears are ignored, so a key
+pressed while clicking into it cannot answer a question you have not read. Once nothing is waiting, the pane goes
+back to herdr's own reading of the agent. A session with no herdr pane, or
+whose pane is gone, is refused at once and the reason is written to
+`~/.saint/proxy.out`.
+
+```bash
+saint allow                  # saved and shipped hosts
+saint allow registry.example # save a host
+saint allow '*.example.com'  # a domain and its subdomains
+saint allow -rm example.com  # remove a saved host; it is asked about again
+```
+
+Saved hosts live in `proxy_allow_hosts` in `~/.saint/config.json`, and a change
+applies from the next request. Every decision is in the request journal
+(`saint proxy log`) with its reason: shipped allowlist, saved rule, answered,
+or no answer. saint sees the host and the bytes crossing; it never sees inside
+TLS, so a host you allow can be sent anything.
 
 ## Sessions
 
@@ -170,9 +230,8 @@ Refused regardless of the mount roots, after resolving symlinks:
   `~/.config`, `~/.claude`, `~/.cursor`, `~/.docker`, `~/.kube`, `~/.gcloud`,
   `~/.azure`, `~/.npm`, `~/.gem`, `~/.cargo`, `~/Library`
 
-Containers stay on the runtime's default network with normal internet access,
-so `npm install`, `git fetch` and the agents' web tools work. That buys key
-custody and attribution, **not** egress control.
+What a session can reach on the network is in
+[Network access](#network-access).
 
 ### Permissions and pinned runtimes
 
@@ -198,10 +257,11 @@ itself inside the sandbox. Update a runtime by bumping the version in
 | `codex` | OpenAI |
 | `hermes` | planned, not yet integrated |
 
-When an agent reaches a provider outside the proxy's upstream allowlist, saint
-is **not in the path**: that traffic is direct, unmetered and uncustodied, and
-the journal has no record of it. Widening the allowlist is deliberately not the answer;
-the closed list is what stops a credential-injecting hop becoming a pivot.
+Only the two providers above go through the proxy's credential path. Any
+other provider an agent calls is ordinary forward-proxied traffic: asked
+about like any host, never given a credential by saint, and not metered.
+Widening the credential path is deliberately not the answer; the closed list
+is what stops a credential-injecting hop becoming a pivot.
 
 ## What the token counts mean
 

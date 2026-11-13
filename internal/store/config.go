@@ -14,14 +14,17 @@ type Config struct {
 	NonPrimaryReadOnly bool            `json:"non_primary_read_only"`
 	ProxyPort          int             `json:"proxy_port"`
 
-	// ProxyBind is the host address the proxy listens on. It is configurable
-	// because the address a guest can reach the host at is a property of the
-	// user's container networking, not a constant: guests see the host on the
-	// bridge gateway, not on loopback. Empty means the safe default.
-	ProxyBind string `json:"proxy_bind"`
-
-	// ProxyNetwork is the container network whose gateway the proxy binds to
-	// when ProxyBind is "auto". Empty means the runtime's default network.
+	// ProxyBind and ProxyNetwork decide where the proxy listens for sessions
+	// created before each session had its own network. Such a session's guest
+	// was given the shared network's gateway, so the proxy keeps listening
+	// there while one runs. Every newer session is served on its own
+	// network's gateway, discovered at runtime, and neither setting applies to
+	// it.
+	//
+	// ProxyBind is the host address for those older sessions; empty means
+	// "auto", the discovered gateway of ProxyNetwork, which empty means the
+	// runtime's default network.
+	ProxyBind    string `json:"proxy_bind"`
 	ProxyNetwork string `json:"proxy_network"`
 
 	// ProxyAuth decides which credential a session's traffic carries, and
@@ -94,48 +97,17 @@ type Config struct {
 	// Zero means DefaultProxyLogKeepFiles.
 	ProxyLogKeepFiles int `json:"proxy_log_keep_files,omitempty"`
 
-	// ProxyGuestEgress points a guest's HTTP_PROXY and HTTPS_PROXY at saint,
-	// so the traffic that is not model API traffic - git fetch, npm install, a
-	// web-search tool, an update check - goes through the host's forward proxy
-	// instead of straight out of the microVM.
+	// ProxyAllowHosts are the hosts a session may reach through the proxy
+	// beyond the shipped allowlist: every "Allow always" answer, and every
+	// `saint allow <host>`. They apply to every session, running ones included,
+	// from the next request on.
 	//
-	// State the blast radius plainly: with this on, saint sees and records
-	// every host a session's proxy-honouring HTTP traffic reaches. That is the
-	// git remotes it pulls from, the registries it installs from, and the URLs
-	// an agent fetches, by hostname and port, with byte counts. TLS is not
-	// intercepted, so paths, headers and payloads stay unreadable - but the
-	// list of who a session talked to is the user's own browsing-shaped record
-	// of their work, and it lands in saint's journal on disk.
+	// ProxyDenyHosts are refused without asking. Nothing in saint writes them,
+	// because a "Deny" answer refuses one request and is not remembered; they
+	// exist for a person who wants a host never to be asked about.
 	//
-	// It is also not an egress control, and must never be described as one.
-	// The container keeps ordinary internet access either way: a statically
-	// linked binary, anything with its own DNS or a non-HTTP protocol, and a
-	// guest that simply unsets the variables all leave without passing through
-	// here. What this buys is visibility into the traffic that honours the
-	// convention, not containment.
-	//
-	// Off by default, for two independent reasons. Rerouting a user's traffic
-	// through a recording proxy is not something to do because they installed
-	// saint. And the failure mode is total: a guest pointed at a proxy that is
-	// not accepting forward traffic has every clone and every install fail at
-	// once, so this switch may only be on when the host side is serving it.
-	ProxyGuestEgress bool `json:"proxy_guest_egress,omitempty"`
-
-	// ProxyEgressEnforce turns the host policy from a record into a control.
-	//
-	// Off, saint records every host a session reaches and refuses none, which
-	// is visibility and should not be described as anything more. On, a host
-	// that is neither ruled on nor in the shipped allowlist is put to you, and
-	// refused if you are not there to answer.
-	//
-	// It requires proxy_guest_egress, because a policy only binds the traffic
-	// that crosses the proxy. A guest that was never pointed at saint is not
-	// governed by this setting and saint says so rather than implying
-	// otherwise.
-	ProxyEgressEnforce bool `json:"proxy_egress_enforce,omitempty"`
-
-	// ProxyAllowHosts and ProxyDenyHosts are the answers you have already
-	// given. A denial is permanent and is never re-asked.
+	// Both are written only through Store.UpdateConfig, because the proxy and
+	// `saint allow` can write at the same moment.
 	ProxyAllowHosts []string `json:"proxy_allow_hosts,omitempty"`
 	ProxyDenyHosts  []string `json:"proxy_deny_hosts,omitempty"`
 
@@ -253,18 +225,6 @@ func (c Config) ProxyBindIsLoopback() bool {
 // keeps the usage records until it opts in.
 func (c Config) ProxyLogRequestsOrDefault() bool {
 	return c.ProxyLogRequests
-}
-
-// ProxyGuestEgressOrDefault reports whether guests are pointed at saint for
-// their non-API HTTP traffic.
-//
-// Absent means off, and here that is not just the omitempty argument that
-// applies to ProxyLogRequests - off is also the only safe reading. Every config
-// file written before this field existed belongs to an install whose proxy is
-// not serving forward traffic, and a guest pointed at a proxy that refuses to
-// forward cannot clone or install anything at all.
-func (c Config) ProxyGuestEgressOrDefault() bool {
-	return c.ProxyGuestEgress
 }
 
 // ProxyLogMaxBytesOrDefault returns the size the journal rotates at.
@@ -416,15 +376,6 @@ const (
 	ListStyleTable  = "table"
 	ListStyleBlocks = "blocks"
 )
-
-// ProxyEgressEnforceOrDefault reports whether the host policy is enforced.
-//
-// Enforcement without egress proxying would be a claim with nothing behind it:
-// the policy governs traffic that crosses the proxy, and a guest that was never
-// pointed at saint does not. So it reads off unless both are on.
-func (c Config) ProxyEgressEnforceOrDefault() bool {
-	return c.ProxyEgressEnforce && c.ProxyGuestEgressOrDefault()
-}
 
 // ListStyleOrDefault reports how the session list is drawn. Anything
 // unrecognised reads as the table, so a hand-edited config cannot produce a

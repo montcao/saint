@@ -18,9 +18,11 @@ func (s listSandbox) List(context.Context) ([]sandbox.Info, error) { return s.in
 func (listSandbox) Create(context.Context, string, sandbox.Runtime, []sandbox.Repo, string, string, sandbox.CreateOptions) error {
 	return nil
 }
-func (listSandbox) Stop(context.Context, string) error   { return nil }
-func (listSandbox) Start(context.Context, string) error  { return nil }
-func (listSandbox) Remove(context.Context, string) error { return nil }
+func (listSandbox) CreateNetwork(context.Context, string) (string, error) { return "", nil }
+func (listSandbox) RemoveNetwork(context.Context, string) error           { return nil }
+func (listSandbox) Stop(context.Context, string) error                    { return nil }
+func (listSandbox) Start(context.Context, string) error                   { return nil }
+func (listSandbox) Remove(context.Context, string) error                  { return nil }
 func (listSandbox) AttachCmd(string, sandbox.AttachOptions) (*exec.Cmd, error) {
 	return nil, nil
 }

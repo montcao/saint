@@ -71,6 +71,12 @@ func (a *AppleContainer) Create(ctx context.Context, name string, rt Runtime, re
 		"--memory", fmt.Sprintf("%dG", memoryGB),
 		"--workdir", repos[0].Path,
 	}
+	if opts.Network != "" {
+		if err := ValidateContainerName(opts.Network); err != nil {
+			return fmt.Errorf("create: network: %w", err)
+		}
+		args = append(args, "--network", opts.Network)
+	}
 	// The runtime version is pinned in the image, so the agent must not replace
 	// it at runtime. Set here as well as in the Dockerfile so a container built
 	// from an image that predates the pin is fixed without a rebuild.
@@ -253,6 +259,22 @@ const (
 	// that happens to usually be saint's own. It is a diagnostic and never a
 	// decision: nothing branches on it, it is sanitised, and it is shown.
 	BootstrapErrorFile = "bootstrap-error"
+
+	// ProxyReadyFile is written into the session directory by the proxy once
+	// it listens on the session's network, and the bootstrap script waits for
+	// it before starting the agent.
+	//
+	// The host's address on an internal network appears only when a container
+	// attaches, so the proxy cannot listen before the container runs
+	// (docs/research/spikes.md). Waiting here means the agent's first request
+	// finds a listener rather than a refused connection. The wait is bounded:
+	// a proxy that never comes up costs the agent its network, not its start.
+	// The guest can write this file itself, which buys it nothing - it is a
+	// signal about timing, never a permission.
+	ProxyReadyFile = "proxy-ready"
+
+	// proxyReadyWaitTenths bounds that wait, in tenths of a second.
+	proxyReadyWaitTenths = 150
 )
 
 func runtimeBootstrapScript(rt Runtime, workdir string, opts CreateOptions) (string, error) {
@@ -266,6 +288,13 @@ func runtimeBootstrapScript(rt Runtime, workdir string, opts CreateOptions) (str
 	// worth a session. Almost none of them are.
 	lines := []string{"set -u"}
 	lines = append(lines, onboardingLines(rt, workdir)...)
+	if opts.Network != "" {
+		lines = append(lines,
+			"_saint_i=0",
+			fmt.Sprintf(`while [ ! -e /saint/%s ] && [ "$_saint_i" -lt %d ]; do sleep 0.1; _saint_i=$((_saint_i+1)); done`,
+				ProxyReadyFile, proxyReadyWaitTenths),
+		)
+	}
 	command, err := runtimeCommand(rt, workdir, opts)
 	if err != nil {
 		return "", err

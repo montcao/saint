@@ -10,9 +10,11 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/montcao/saint/internal/sandbox"
 	"github.com/montcao/saint/internal/session"
+	"github.com/montcao/saint/internal/store"
 )
 
 // herdrPluginID and herdrPaneEntrypoint must match herdr-plugin.toml at the
@@ -111,13 +113,15 @@ func herdrBinary() string {
 
 func runHerdr(ctx context.Context, deps sessionDeps, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: saint herdr open [claude|codex] | saint herdr pane")
+		return errors.New("usage: saint herdr open [claude|codex] | saint herdr pane | saint herdr egress")
 	}
 	switch args[0] {
 	case "open":
 		return runHerdrOpen(ctx, args[1:])
 	case "pane":
 		return runHerdrPane(ctx, deps, os.Stdin, os.Stdout)
+	case "egress":
+		return runHerdrEgress(deps.svc.Store.Paths().ControlSocket, os.Stdin, os.Stdout)
 	default:
 		return fmt.Errorf("unknown herdr command %q", args[0])
 	}
@@ -152,10 +156,20 @@ func runHerdrOpen(ctx context.Context, args []string) error {
 // sessionDeps is what starting or reopening a session needs from the wiring
 // in run, for `saint new`, `saint attach` and the herdr pane alike.
 type sessionDeps struct {
-	svc          *session.Service
-	ensureProxy  func(context.Context) error
+	svc         *session.Service
+	ensureProxy func(context.Context) error
+	// listen asks the running proxy to listen on a session's network and
+	// returns the address.
+	listen func(ctx context.Context, sessionID string) (string, error)
+	// probe reports whether an address accepts connections.
+	probe        func(addr string) bool
+	reachTimeout time.Duration
 	startService func(context.Context) error
-	guestURL     func(context.Context) (string, error)
+	// checkService reports whether the container service answers, so a
+	// stopped one is offered a start before anything is created.
+	checkService func(context.Context) error
+	// pane is the herdr pane this process runs in, if any.
+	pane func() *store.HerdrPane
 }
 
 // runHerdrPane is the pane entrypoint. herdr closes a pane when its command
@@ -199,18 +213,55 @@ func reattach(ctx context.Context, deps sessionDeps, ref string) error {
 	}
 	// Start fails for a session that is already running, which is fine.
 	_ = deps.svc.Start(ctx, found.ID)
-	if err := deps.ensureProxy(ctx); err != nil {
+	if err := serveSession(ctx, deps, found.ID); err != nil {
 		return err
 	}
-	return execAttach(deps.svc.AttachCmd(found.ID))
+	return attachHere(deps, found.ID)
+}
+
+// attachHere attaches to a session, recording on it the herdr pane this runs
+// in for as long as the attach lasts, so the proxy knows where to ask about a
+// host for it.
+func attachHere(deps sessionDeps, sessionID string) error {
+	var pane *store.HerdrPane
+	if deps.pane != nil {
+		pane = deps.pane()
+	}
+	if pane != nil {
+		if err := deps.svc.Store.UpdateSession(sessionID, func(s *store.Session) { s.Herdr = pane }); err != nil {
+			return err
+		}
+		defer func() {
+			// Only this pane's own record is cleared: another pane may have
+			// attached since and recorded itself.
+			_ = deps.svc.Store.UpdateSession(sessionID, func(s *store.Session) {
+				if s.Herdr != nil && *s.Herdr == *pane {
+					s.Herdr = nil
+				}
+			})
+		}()
+	}
+	return execAttach(deps.svc.AttachCmd(sessionID))
+}
+
+// currentHerdrPane is the herdr pane this process runs in, from the variables
+// herdr sets in every pane, or nil outside herdr.
+func currentHerdrPane() *store.HerdrPane {
+	id := os.Getenv("HERDR_PANE_ID")
+	if id == "" {
+		return nil
+	}
+	return &store.HerdrPane{
+		PaneID:     id,
+		SocketPath: os.Getenv("HERDR_SOCKET_PATH"),
+		BinPath:    os.Getenv("HERDR_BIN_PATH"),
+	}
 }
 
 // startAndAttach creates a session behind the proxy and attaches to it.
 func startAndAttach(ctx context.Context, deps sessionDeps, in *bufio.Reader, out io.Writer, req session.CreateRequest) error {
-	// The guest's proxy address comes from the runtime's network
-	// configuration, so it is known before any container exists. Reading it
-	// is also the first call that needs the container service.
-	url, err := deps.guestURL(ctx)
+	// The first call that needs the container service.
+	err := deps.checkService(ctx)
 	if errors.Is(err, sandbox.ErrServiceStopped) {
 		// Usual after a reboot. Starting it affects every container on this
 		// Mac, not just saint's, so the user says yes first.
@@ -223,31 +274,29 @@ func startAndAttach(ctx context.Context, deps sessionDeps, in *bufio.Reader, out
 		if err := deps.startService(ctx); err != nil {
 			return fmt.Errorf("start container service: %w", err)
 		}
-		url, err = deps.guestURL(ctx)
+		err = deps.checkService(ctx)
 	}
 	if err != nil {
-		return fmt.Errorf("proxy address: %w", err)
+		return fmt.Errorf("container service: %w", err)
 	}
-	deps.svc.ProxyURL = url
 
 	rt := req.Runtime
 	if rt == "" {
 		rt = sandbox.RuntimeClaude
 	}
-	fmt.Fprintf(out, "saint: starting a %s microVM\n", rt)
+	fmt.Fprintf(out, "saint: starting a %s microVM on its own network\n", rt)
 	created, err := deps.svc.Create(ctx, req)
 	if err != nil {
 		return err
 	}
 
-	// The proxy starts after the container, not before: the bridge address
-	// it binds exists only while a container is attached to the network
-	// (docs/research/spikes.md). The agent sends nothing until someone types,
-	// and a bound listener outlives the bridge, so this order leaves no
-	// window where a live agent has no proxy.
+	// The proxy listens after the container starts, not before: the
+	// network's gateway address exists only while a container is attached
+	// (docs/research/spikes.md). The guest's init waits for the proxy before
+	// starting the agent, so the agent's first request finds a listener.
 	fmt.Fprintln(out, "saint: starting the credential proxy")
-	if err := deps.ensureProxy(ctx); err != nil {
-		return fmt.Errorf("%w (session %s is running without API access; reopen it after fixing this)", err, created.Name)
+	if err := serveSession(ctx, deps, created.ID); err != nil {
+		return fmt.Errorf("%w (session %s has no network access; reopen it after fixing this)", err, created.Name)
 	}
-	return execAttach(deps.svc.AttachCmd(created.ID))
+	return attachHere(deps, created.ID)
 }

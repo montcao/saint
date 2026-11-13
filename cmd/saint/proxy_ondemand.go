@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -28,6 +26,8 @@ const proxyStartTimeout = 30 * time.Second
 // session's agent keeps running in its microVM; a proxy tied to the pane
 // would cut that agent's API access the moment its pane closed.
 type proxyStarter struct {
+	// addr is where the proxy answers when it is running: its control
+	// socket, which exists before any session network does.
 	addr    func(context.Context) (string, error)
 	probe   func(string) bool
 	spawn   func() (exited <-chan error, err error)
@@ -70,10 +70,7 @@ func (p proxyStarter) ensure(ctx context.Context) error {
 				return nil
 			}
 		case <-deadline.C:
-			// A listener that is running but unreachable is almost always the
-			// macOS application firewall dropping connections to a binary it
-			// has not been told to allow.
-			return fmt.Errorf("proxy started but %s is not reachable after %s; run `saint doctor` (the macOS firewall may be blocking saint)", addr, p.timeout)
+			return fmt.Errorf("proxy started but did not answer on %s after %s: %s; run `saint doctor`", addr, p.timeout, p.lastLog())
 		}
 	}
 }
@@ -94,26 +91,56 @@ func (p proxyStarter) lastLog() string {
 	return text
 }
 
-func newProxyStarter(st *store.Store, containerPath string) proxyStarter {
+func newProxyStarter(st *store.Store) proxyStarter {
 	logPath := filepath.Join(st.Paths().Root, "proxy.out")
 	return proxyStarter{
-		addr: func(ctx context.Context) (string, error) {
-			cfg, err := st.EnsureConfig()
-			if err != nil {
+		addr: func(context.Context) (string, error) {
+			// The port is chosen on first use of a state directory; doing it
+			// here means the proxy and the pane cannot pick different ones.
+			if _, err := st.EnsureConfig(); err != nil {
 				return "", err
 			}
-			host, err := resolveProxyBindHost(ctx, cfg, containerPath)
-			if err != nil {
-				return "", err
-			}
-			return net.JoinHostPort(host, strconv.Itoa(cfg.ProxyPort)), nil
+			return st.Paths().ControlSocket, nil
 		},
-		probe:   probeProxy,
+		probe:   pingProxy,
 		spawn:   func() (<-chan error, error) { return spawnDetachedProxy(logPath) },
 		timeout: proxyStartTimeout,
 		poll:    200 * time.Millisecond,
 		logPath: logPath,
 	}
+}
+
+// proxyReachTimeout bounds how long a pane waits for a session's listener to
+// accept a connection once the proxy says it is listening.
+const proxyReachTimeout = 5 * time.Second
+
+// serveSession makes sure the proxy runs and listens on a session's network,
+// and that the listener can actually be reached.
+//
+// A successful bind proves nothing on macOS: the application firewall lets an
+// unlisted binary bind the bridge address and then drops every connection to
+// it (docs/research/spikes.md). So the listener is probed before the pane
+// attaches, and a listener that does not answer is reported as the firewall.
+func serveSession(ctx context.Context, deps sessionDeps, sessionID string) error {
+	if err := deps.ensureProxy(ctx); err != nil {
+		return err
+	}
+	addr, err := deps.listen(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("proxy: %w", err)
+	}
+	deadline := time.Now().Add(deps.reachTimeout)
+	for !deps.probe(addr) {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the proxy listens on %s but it is not reachable; run `saint doctor` (the macOS firewall may be blocking saint)", addr)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return nil
 }
 
 // spawnDetachedProxy runs `saint proxy` in a new session, writing to logPath.

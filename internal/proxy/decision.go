@@ -80,31 +80,36 @@ type policyDecider struct {
 }
 
 func (d *policyDecider) Decide(ctx context.Context, sessionID, host string) Decision {
+	decision, _ := d.decide(ctx, sessionID, host)
+	return decision
+}
+
+// decide is Decide with the reason, for the record of what was decided.
+func (d *policyDecider) decide(ctx context.Context, sessionID, host string) (Decision, string) {
 	host = strings.ToLower(strings.TrimSpace(host))
 
-	// An explicit denial is final and is never asked about. A user who has
-	// refused a host once should not be asked again by the next session.
+	// An explicit denial is final and is never asked about.
 	if d.policy != nil {
 		for _, rule := range d.policy.Deny {
 			if matchHostRule(rule, host) {
-				return DecisionDeny
+				return DecisionDeny, ReasonRule
 			}
 		}
 		for _, rule := range d.policy.Allow {
 			if matchHostRule(rule, host) {
-				return DecisionAllow
+				return DecisionAllow, ReasonRule
 			}
 		}
 	}
 
 	for _, rule := range d.allowlist {
 		if matchHostRule(rule, host) {
-			return DecisionAllow
+			return DecisionAllow, ReasonDefault
 		}
 	}
 
 	if d.ask == nil {
-		return DecisionDeny
+		return DecisionDeny, ReasonUnanswered
 	}
 
 	wait := d.wait
@@ -114,12 +119,36 @@ func (d *policyDecider) Decide(ctx context.Context, sessionID, host string) Deci
 	ctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 	if answer := d.ask(ctx, sessionID, host); answer != DecisionAsk {
-		return answer
+		return answer, ReasonAnswer
 	}
 	// Nobody answered. A question that timed out is a refusal, not a
 	// permission: the safe direction when there is no person is the one that
 	// does not let traffic out.
-	return DecisionDeny
+	return DecisionDeny, ReasonUnanswered
+}
+
+// Reasons a forward-proxied host was allowed or refused, as DecisionEvent
+// reports them.
+const (
+	// ReasonRule: a saved allow or deny rule (HostPolicy) matched.
+	ReasonRule = "rule"
+	// ReasonDefault: the host is on the shipped allowlist.
+	ReasonDefault = "default"
+	// ReasonAnswer: a person was asked and answered.
+	ReasonAnswer = "answer"
+	// ReasonUnanswered: nobody answered in time, or there was nobody to ask.
+	ReasonUnanswered = "unanswered"
+	// ReasonObserved: enforcement is off, so nothing was ruled on.
+	ReasonObserved = "observed"
+)
+
+// DecisionEvent is one ruling on a forward-proxied host, for a caller to
+// record. It names the host, never a path, header or payload.
+type DecisionEvent struct {
+	SessionID string
+	Host      string
+	Decision  Decision
+	Reason    string
 }
 
 // defaultAllowedHosts are the hosts an agent needs before it can do anything at
@@ -156,4 +185,12 @@ var defaultAllowedHosts = []string{
 	"sum.golang.org",
 	"crates.io",
 	"static.crates.io",
+
+	// Claude Code reaches these on its first start: downloads for its own
+	// updater, and its third-party logging intake for metrics and error
+	// reports. Without them every new session is asked about both before the
+	// person has typed anything. DISABLE_TELEMETRY, DISABLE_ERROR_REPORTING
+	// and DISABLE_AUTOUPDATER in the guest turn the traffic off instead.
+	"downloads.claude.ai",
+	"http-intake.logs.us5.datadoghq.com",
 }

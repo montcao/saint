@@ -73,7 +73,8 @@ saint attach <session>  # reconnect to a session
 saint stop <session>    # stop a session, keep it
 saint rm <session>      # delete a session; your files are untouched
 saint doctor            # check the setup
-saint proxy log         # what each agent called
+saint proxy log         # what each agent called, and every host decision
+saint allow [host]      # hosts every session may reach; -rm <host> removes one
 saint new <repo>        # start a session without herdr
 ```
 
@@ -83,8 +84,11 @@ saint new <repo>        # start a session without herdr
   sees it. With your Claude plan, the agent has to hold the plan's token
   itself; that is how plan billing works. `saint auth` shows which one new
   sessions use.
-- **Network access is open.** Agents can reach the internet, so `npm install`
-  and `git fetch` work. saint records traffic but does not block it yet.
+- **Network access is asked for.** Each session runs on its own network with
+  no way out but saint's proxy. Provider APIs, GitHub and the main package
+  registries work out of the box; for any other host, the session's pane
+  asks you to **Allow always** or **Deny**. `saint allow` lists and edits
+  what you have allowed.
 - **Not packaged yet.** saint builds from source and is unsigned, which is why
   the firewall step exists.
 

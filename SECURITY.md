@@ -39,8 +39,17 @@ These are the claims worth testing:
   and status, git does not read that repository's configuration. This covers
   saint, not your own later `git` commands in that repository, which run its
   configuration as git always does.
-- The forward proxy, when enabled, refuses loopback and link-local targets by
-  default, including the cloud metadata address.
+- A session's guest reaches the network only through saint's proxy. Each
+  session runs on its own internal container network, which has no route out
+  and no resolver (measured in `docs/research/spikes.md`); the proxy allows the
+  shipped and saved hosts, asks about any other, and refuses when nobody
+  answers. A guest that ignores the proxy variables, uses a non-HTTP protocol
+  or resolves names itself gets no network, not an unobserved one.
+- One session's guest cannot reach another session's microVM: they are on
+  different networks.
+- A session's proxy token is accepted only on its own network's listener.
+- The forward proxy refuses loopback and link-local targets, including the
+  cloud metadata address.
 
 These are **not** claims, and a report that they fail is a documentation bug
 rather than a vulnerability:
@@ -48,11 +57,16 @@ rather than a vulnerability:
 - **The proxy does not inspect TLS.** For forward-proxied traffic it sees
   hostnames and byte counts, never content. Data leaving through a host the
   policy allows is not visible to saint.
-- **Guest egress proxying is not, on its own, egress control.** The environment
-  variables are advisory: a static binary, a non-HTTP protocol, or a guest that
-  unsets them all leave unobserved. Enforcement requires putting sessions on a
-  network with no other route out, which is designed and measured in `docs/research/spikes.md`
-  but not yet built.
+- **A host you allow is allowed for every session, and for everything on it.**
+  The policy is per hostname: it does not see paths or content, so data can
+  leave through any allowed host, the shipped ones (GitHub, the package
+  registries, the provider APIs) included.
+- **Sessions created before per-session networks** stay on the runtime's shared
+  network, with ordinary internet access and reachable by each other, until
+  they are recreated. The claims above are about sessions saint creates now.
+- **The host itself is reachable on the session's gateway.** Only the proxy
+  port is meant for the guest, but any other service the host listens with on
+  all interfaces is reachable from it too, as on any container network.
 - **Subscription mode puts a real credential inside the guest.** This is
   inherent, not a defect: a gateway credential replaces the subscription and
   bills per token, so plan billing requires the guest to hold its own token. The
@@ -61,8 +75,6 @@ rather than a vulnerability:
 - **The microVM is the isolation boundary, not the agent's own permission
   prompts.** Sessions created with permissions skipped are behaving as
   documented.
-- Sessions sharing a container network can reach each other. Measured, recorded
-  in `docs/research/spikes.md`, and not yet addressed.
 
 ## Handling of secrets in this repository
 

@@ -39,6 +39,11 @@ const (
 	journalKindTunnel = "tunnel"
 	journalKindUsage  = "usage"
 
+	// journalKindEgress is a ruling on a host a session asked to reach
+	// through the forward proxy: allowed or denied, and why (the shipped
+	// allowlist, a saved rule, a person's answer, or no answer).
+	journalKindEgress = "egress"
+
 	// journalKindDrop records that the buffer overflowed. A journal that
 	// silently loses records is worse than one with a gap in it, because
 	// nothing on screen says the gap is there.
@@ -110,6 +115,11 @@ type journalRecord struct {
 
 	// Dropped is how many records were lost, on a journalKindDrop record.
 	Dropped int `json:"dropped,omitempty"`
+
+	// Decision and Reason are a journalKindEgress record's ruling; its host
+	// is in Path.
+	Decision string `json:"decision,omitempty"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 // journal appends records to a size-rotated file from a single goroutine.
@@ -358,7 +368,22 @@ func (r journalRecord) sanitized() journalRecord {
 	r.Provider = journalText(r.Provider)
 	r.Auth = journalText(r.Auth)
 	r.Model = journalText(r.Model)
+	r.Decision = journalText(r.Decision)
+	r.Reason = journalText(r.Reason)
 	return r
+}
+
+// egressRecord turns a ruling on a forward-proxied host into a journal record.
+// The host comes from the guest, so it is sanitised like a path.
+func egressRecord(ev proxy.DecisionEvent, at time.Time) journalRecord {
+	return journalRecord{
+		Time:      at,
+		Kind:      journalKindEgress,
+		SessionID: ev.SessionID,
+		Path:      ev.Host,
+		Decision:  ev.Decision.String(),
+		Reason:    ev.Reason,
+	}
 }
 
 // journalText makes one untrusted value safe to store and later print.

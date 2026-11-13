@@ -58,6 +58,27 @@ type Session struct {
 	// question ("is this session still carrying the skill I reviewed?") is a
 	// comparison, not a guess. See hashSkillTree.
 	SkillHashes map[string]string `json:"skill_hashes,omitempty"`
+
+	// Network is the container network this session's microVM runs on, its
+	// own internal network with no route out except the proxy. Empty means a
+	// session created before sessions had their own network: it runs on the
+	// shared network (Config.ProxyNetwork) with ordinary internet access.
+	Network string `json:"network,omitempty"`
+
+	// Herdr is the herdr pane showing this session right now, if any. The
+	// proxy uses it to mark the pane blocked and to ask about a host there.
+	// It is cleared when that pane detaches, and it may still be stale (a pane
+	// killed outright), so a caller treats a failed herdr call as "no pane".
+	Herdr *HerdrPane `json:"herdr,omitempty"`
+}
+
+// HerdrPane is how to reach one herdr pane from outside it: its ID, and the
+// herdr binary and API socket of the server that owns it, because a named
+// herdr session has a socket of its own.
+type HerdrPane struct {
+	PaneID     string `json:"pane_id"`
+	SocketPath string `json:"socket_path,omitempty"`
+	BinPath    string `json:"bin_path,omitempty"`
 }
 
 // ProxyAuthOrDefault reports a session's auth mode, defaulting for sessions
@@ -87,6 +108,14 @@ type Paths struct {
 	// mounted into guests, and nothing a guest can write may decide which
 	// session the host thinks it is talking to.
 	TokensDir string
+
+	// ControlSocket is the running proxy's unix socket: panes ask it to listen
+	// on a session's network and answer its questions about hosts through it.
+	ControlSocket string
+
+	// LockPath serialises read-modify-write updates to config.json and
+	// sessions.json between processes (the proxy, panes and the CLI).
+	LockPath string
 }
 
 type Store struct {
@@ -112,6 +141,9 @@ func pathsAt(home, root string) Paths {
 		HooksDir:     filepath.Join(root, "hooks"),
 		ProxyLogPath: filepath.Join(root, "proxy.jsonl"),
 		TokensDir:    filepath.Join(root, "tokens"),
+
+		ControlSocket: filepath.Join(root, "proxy.sock"),
+		LockPath:      filepath.Join(root, "state.lock"),
 	}
 }
 

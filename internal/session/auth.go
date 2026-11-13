@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -237,6 +239,17 @@ func (s *Service) RenewCredential(ctx context.Context, id string) (store.Session
 		return store.Session{}, fmt.Errorf("replace container: %w", err)
 	}
 
+	// The replacement runs on the session's own network, which also moves a
+	// session from before per-session networks onto one.
+	if session.Network == "" {
+		session.Network = networkName(session.ID)
+	}
+	proxyURL, err := s.sessionProxyURL(ctx, cfg, session.Network)
+	if err != nil {
+		return store.Session{}, fmt.Errorf("recreate session: %w", err)
+	}
+	_ = os.Remove(filepath.Join(sessionDir, sandbox.ProxyReadyFile))
+
 	createOpts := sandbox.CreateOptions{
 		CPUs:              session.CPUs,
 		MemoryGB:          session.MemoryGB,
@@ -245,10 +258,11 @@ func (s *Service) RenewCredential(ctx context.Context, id string) (store.Session
 		SkipPermissions:   session.SkipPermissions,
 		AuthMode:          auth.Mode,
 		SubscriptionToken: auth.Token,
-		ProxyEgress:       cfg.ProxyGuestEgressOrDefault(),
+		ProxyEgress:       true,
+		Network:           session.Network,
 		SkillMounts:       skillMounts,
 	}
-	if err := s.Sandbox.Create(ctx, name, session.Runtime, session.Repos, sessionDir, s.ProxyURL, createOpts); err != nil {
+	if err := s.Sandbox.Create(ctx, name, session.Runtime, session.Repos, sessionDir, proxyURL, createOpts); err != nil {
 		return store.Session{}, fmt.Errorf("recreate session: %w", err)
 	}
 
@@ -256,8 +270,14 @@ func (s *Service) RenewCredential(ctx context.Context, id string) (store.Session
 	session.Credential = auth.Source
 	session.CredentialExpiresAt = auth.ExpiresAt
 	session.LastRunAt = s.now()
-	sessions[idx] = session
-	if err := s.Store.SaveSessions(sessions); err != nil {
+	if err := s.Store.UpdateSession(session.ID, func(stored *store.Session) {
+		stored.ProxyAuth = session.ProxyAuth
+		stored.Credential = session.Credential
+		stored.CredentialExpiresAt = session.CredentialExpiresAt
+		stored.LastRunAt = session.LastRunAt
+		stored.Network = session.Network
+		session = *stored
+	}); err != nil {
 		return store.Session{}, err
 	}
 	return session, nil
