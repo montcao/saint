@@ -114,6 +114,29 @@ container to another on the same internal network got `ECONNREFUSED`: the
 packet arrived and the peer answered. Isolating sessions needs a network per
 session, not one per install.
 
+**Separate internal networks cannot.** Two internal networks, a listener in a
+container on the second (Apple `container` 1.3.0):
+
+| Probe | Result |
+|---|---|
+| container on the same network to the listener | connects |
+| container on the other network to the listener | timeout |
+| container on the same network to a host listener on that network's gateway | connects |
+| container on the other network to that host listener | timeout |
+
+So a session on its own network reaches neither another session's microVM nor
+the proxy listener on another session's gateway. saint still accepts a
+session's token only on its own network's listener, as a second lock.
+
+**A new network's gateway is known before any container exists.**
+`container network create --internal` returns at once, and `network ls`
+reports the network (mode `hostOnly`) with its `ipv4Gateway` straight away,
+from configuration, so a guest's proxy URL can be written before the container
+is created. Deleting a network that does not exist exits 1 with a generic
+`failed to delete one or more networks`, so saint checks `network ls` first.
+Creating one that exists fails with `network ... already exists`. A deleted
+network's subnet is handed to the next network created.
+
 **The bridge address exists only while a container is attached.** Binding the
 gateway before any container exists fails with
 `bind: can't assign requested address`. `container network ls` reports the
@@ -134,6 +157,24 @@ So only the first bind is hard. The sequence that handles it:
 4. Launch the agent with `container exec`.
 
 Nothing runs in the guest between the bridge coming up and the proxy binding.
+
+**saint end to end** (herdr 0.9.5, Apple `container` 1.3.0, the session image
+of this repository). From inside a session's guest:
+
+| Probe | Result |
+|---|---|
+| DNS lookup of a public name | `EAI_AGAIN` |
+| TCP straight to a public address on 443 | timeout |
+| `CONNECT github.com:443` through the proxy (shipped allowlist) | 200, TLS completes, `HTTP/1.1 200 OK` |
+| `CONNECT example.com:443`, prompt answered "Allow always" | 200, TLS completes; the host is saved |
+| the same host after a proxy restart | 200 without asking |
+| an unlisted host, prompt answered "Deny" | 403 |
+| an unlisted host, no answer in 20 s | 403, journalled as no answer |
+| an unlisted host after the session's pane was closed | 403 in about 0.1 s |
+
+On its first start, Claude Code 2.1.247 asked to reach
+`http-intake.logs.us5.datadoghq.com` and `downloads.claude.ai`, neither of
+which is on the shipped allowlist, so a new install is asked about both.
 
 Not measured: whether `--dns` can point a guest at the host proxy for
 resolution.
@@ -205,12 +246,24 @@ passes an environment to that command, so one host wrapper can read
 - With `HERDR_AGENT=claude` set on the host wrapper, herdr reads the guest's
   screen and reports the agent. A hint set only inside the guest is invisible
   to herdr.
-- `herdr pane report-agent --source custom:<name> --agent <a> --state <s>`
+- `herdr pane report-agent <pane> --source <id> --agent <a> --state <s>`
   sets `working` or `blocked` directly, overrides screen detection, and wakes
-  `herdr agent wait`. saint's proxy already knows when a request is in flight,
-  so it can report `working` itself.
-- `herdr pane release-agent` (which needs both `--agent` and `--source`)
-  returns the pane to screen detection.
+  `herdr agent wait`. `--source saint` is accepted; `--source custom:saint`
+  is rejected as `unknown option` by 0.9.5. saint reports `blocked` while a
+  host waits for an answer.
+- `herdr pane release-agent <pane> --source <id> --agent <a>` returns the pane
+  to screen detection. With the pane ID after the options, 0.9.5 rejects it
+  (`unknown option: saint`), so saint puts the pane first in both commands.
+- `--message` is accepted, but `pane get` and `api snapshot` do not return it,
+  so whether herdr shows it was not observed from the CLI.
+
+**An overlay plugin pane opens only on the active pane.**
+`herdr plugin pane open --placement overlay --target-pane <pane>` fails with
+`overlay and popup plugin panes target the active pane`. `herdr agent focus
+<pane>` makes a pane active, switching workspace if needed, so saint focuses
+the session's pane and then opens the overlay. A plugin pane also receives
+`HERDR_PANE_ID`, `HERDR_SOCKET_PATH` and `HERDR_BIN_PATH`, which is how a
+session's pane is recorded for the proxy.
 
 Gotchas:
 - `agent wait` on a pane that herdr does not yet treat as an agent fails at

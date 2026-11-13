@@ -16,7 +16,7 @@ nothing about whether the document is still true.
 | [`ARCHITECTURE.md`](../ARCHITECTURE.md) | architecture | which package owns which answer, and the boundaries between them | Reviewed: 2026-11-09 edited |
 | [`README.md`](../README.md) | user guide | what saint is and how to start using it with herdr | Reviewed: 2026-11-09 edited |
 | [`docs/guide/configuration.md`](guide/configuration.md) | user guide | billing modes, secret stores, mount limits, the request journal, known limits | Reviewed: 2026-11-09 edited |
-| [`SECURITY.md`](../SECURITY.md) | security | how to report a vulnerability; which boundaries saint claims | Reviewed: 2026-11-05 edited |
+| [`SECURITY.md`](../SECURITY.md) | security | how to report a vulnerability; which boundaries saint claims | Reviewed: 2026-11-09 edited |
 | [`docs/design/principles.md`](design/principles.md) | design | what saint is for and the rules that follow from it | Reviewed: 2026-11-09 edited |
 | [`docs/operations/workflow.md`](operations/workflow.md) | operations | commits, branches, pull requests, merging, reporting | Reviewed: 2026-11-09 edited |
 | [`docs/research/gotchas.md`](research/gotchas.md) | research | traps in herdr plugin work and testing that cost real time | Reviewed: 2026-11-09 edited |
