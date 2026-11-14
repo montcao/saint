@@ -113,7 +113,7 @@ func herdrBinary() string {
 
 func runHerdr(ctx context.Context, deps sessionDeps, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: saint herdr open [claude|codex] | saint herdr pane | saint herdr egress")
+		return errors.New("usage: saint herdr open [claude|codex] | saint herdr pane | saint herdr egress | saint herdr telemetry")
 	}
 	switch args[0] {
 	case "open":
@@ -122,6 +122,8 @@ func runHerdr(ctx context.Context, deps sessionDeps, args []string) error {
 		return runHerdrPane(ctx, deps, os.Stdin, os.Stdout)
 	case "egress":
 		return runHerdrEgress(deps.svc.Store.Paths().ControlSocket, os.Stdin, os.Stdout)
+	case "telemetry":
+		return runHerdrTelemetry(ctx, deps.svc.Store)
 	default:
 		return fmt.Errorf("unknown herdr command %q", args[0])
 	}

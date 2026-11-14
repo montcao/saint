@@ -309,11 +309,22 @@ func (l *livePolicy) get() *proxy.HostPolicy {
 	if err != nil {
 		return l.policy
 	}
-	l.policy = &proxy.HostPolicy{
-		Allow: append([]string(nil), cfg.ProxyAllowHosts...),
-		Deny:  append([]string(nil), cfg.ProxyDenyHosts...),
-	}
+	l.policy = policyFromConfig(cfg)
 	l.modTime = info.ModTime()
 	l.size = info.Size()
 	return l.policy
+}
+
+// policyFromConfig is the saved policy. With Claude Code's telemetry off, the
+// hosts it goes to are refused outright: a deny rule wins over the shipped
+// allowlist and over a saved allow, and nobody is asked.
+func policyFromConfig(cfg store.Config) *proxy.HostPolicy {
+	deny := append([]string(nil), cfg.ProxyDenyHosts...)
+	if cfg.ClaudeTelemetryOff {
+		deny = append(deny, proxy.ClaudeTelemetryHosts()...)
+	}
+	return &proxy.HostPolicy{
+		Allow: append([]string(nil), cfg.ProxyAllowHosts...),
+		Deny:  deny,
+	}
 }

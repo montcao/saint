@@ -352,3 +352,34 @@ func TestPermissionModeIsAChoice(t *testing.T) {
 		})
 	}
 }
+
+// Claude Code's own switches for its background traffic are set only when
+// telemetry is off, and only for Claude.
+func TestCreateSwitchesOffClaudeTelemetry(t *testing.T) {
+	t.Parallel()
+
+	off := strings.Join(createArgv(t, CreateOptions{ProxyToken: "session-token", ClaudeTelemetryOff: true}), "\n")
+	on := strings.Join(createArgv(t, CreateOptions{ProxyToken: "session-token"}), "\n")
+	for _, assignment := range claudeTelemetryOffEnv {
+		if !strings.Contains(off, assignment) {
+			t.Errorf("telemetry off: argv lacks %s", assignment)
+		}
+		if strings.Contains(on, assignment) {
+			t.Errorf("telemetry on: argv sets %s", assignment)
+		}
+	}
+
+	binPath, argvPath := fakeContainer(t)
+	sb := NewAppleContainer(binPath, nil)
+	opts := CreateOptions{ProxyToken: "session-token", ClaudeTelemetryOff: true}
+	if err := sb.Create(context.Background(), "saint-abc123", RuntimeCodex, []Repo{{Path: t.TempDir()}}, t.TempDir(), "http://192.0.2.1:8787", opts); err != nil {
+		t.Fatalf("Create(codex) error = %v", err)
+	}
+	data, err := os.ReadFile(argvPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC") {
+		t.Error("a Codex session got Claude Code's telemetry switches")
+	}
+}

@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 )
@@ -186,11 +187,30 @@ var defaultAllowedHosts = []string{
 	"crates.io",
 	"static.crates.io",
 
-	// Claude Code reaches these on its first start: downloads for its own
-	// updater, and its third-party logging intake for metrics and error
-	// reports. Without them every new session is asked about both before the
-	// person has typed anything. DISABLE_TELEMETRY, DISABLE_ERROR_REPORTING
-	// and DISABLE_AUTOUPDATER in the guest turn the traffic off instead.
+	// Claude Code's own background traffic, while it is allowed: see
+	// claudeTelemetryHosts.
 	"downloads.claude.ai",
-	"http-intake.logs.us5.datadoghq.com",
+	"*.datadoghq.com",
+}
+
+// claudeTelemetryHosts are where Claude Code sends its own background traffic:
+// downloads.claude.ai for its updater, and a Datadog log intake for metrics and
+// error reports. Every new session reached both on its first start, so they
+// ship allowed rather than asking every new install about them.
+//
+// The Datadog rule covers the whole domain because the intake host differs by
+// Datadog region. Every subdomain there is Datadog's own, which is what the
+// rule against domain wildcards above protects. What it does not protect: a
+// Datadog intake accepts logs for any Datadog account, so a guest can send
+// data to an account of its choosing while these are allowed. Turning Claude
+// Code's telemetry off (store.Config.ClaudeTelemetryOff) refuses them all.
+var claudeTelemetryHosts = []string{
+	"downloads.claude.ai",
+	"*.datadoghq.com",
+}
+
+// ClaudeTelemetryHosts returns a copy of the hosts Claude Code's background
+// traffic goes to, for a caller that refuses them when that traffic is off.
+func ClaudeTelemetryHosts() []string {
+	return slices.Clone(claudeTelemetryHosts)
 }

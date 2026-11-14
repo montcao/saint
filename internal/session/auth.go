@@ -251,16 +251,17 @@ func (s *Service) RenewCredential(ctx context.Context, id string) (store.Session
 	_ = os.Remove(filepath.Join(sessionDir, sandbox.ProxyReadyFile))
 
 	createOpts := sandbox.CreateOptions{
-		CPUs:              session.CPUs,
-		MemoryGB:          session.MemoryGB,
-		Name:              session.Name,
-		ProxyToken:        proxyToken,
-		SkipPermissions:   session.SkipPermissions,
-		AuthMode:          auth.Mode,
-		SubscriptionToken: auth.Token,
-		ProxyEgress:       true,
-		Network:           session.Network,
-		SkillMounts:       skillMounts,
+		CPUs:               session.CPUs,
+		MemoryGB:           session.MemoryGB,
+		Name:               session.Name,
+		ProxyToken:         proxyToken,
+		SkipPermissions:    session.SkipPermissions,
+		AuthMode:           auth.Mode,
+		SubscriptionToken:  auth.Token,
+		ProxyEgress:        true,
+		Network:            session.Network,
+		SkillMounts:        skillMounts,
+		ClaudeTelemetryOff: cfg.ClaudeTelemetryOff,
 	}
 	if err := s.Sandbox.Create(ctx, name, session.Runtime, session.Repos, sessionDir, proxyURL, createOpts); err != nil {
 		return store.Session{}, fmt.Errorf("recreate session: %w", err)

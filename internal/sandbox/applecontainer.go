@@ -81,6 +81,11 @@ func (a *AppleContainer) Create(ctx context.Context, name string, rt Runtime, re
 	// it at runtime. Set here as well as in the Dockerfile so a container built
 	// from an image that predates the pin is fixed without a rebuild.
 	args = append(args, "--env", "DISABLE_UPDATES=1")
+	if rt == RuntimeClaude && opts.ClaudeTelemetryOff {
+		for _, assignment := range claudeTelemetryOffEnv {
+			args = append(args, "--env", assignment)
+		}
+	}
 
 	subscription := opts.AuthMode == AuthSubscription && opts.SubscriptionToken != ""
 	if proxyURL != "" {
@@ -501,4 +506,16 @@ func redactArgv(args []string) []string {
 		redacted = append(redacted, strconv.Quote(redactURLUserinfo(arg)))
 	}
 	return redacted
+}
+
+// claudeTelemetryOffEnv are Claude Code's own switches for its background
+// traffic. The proxy refuses the hosts that traffic goes to as well; these
+// stop Claude Code trying, so a session does not fill the journal with
+// refusals. CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC also turns off
+// /feedback and feature-flag fetching.
+var claudeTelemetryOffEnv = []string{
+	"DISABLE_TELEMETRY=1",
+	"DISABLE_ERROR_REPORTING=1",
+	"DISABLE_AUTOUPDATER=1",
+	"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
 }

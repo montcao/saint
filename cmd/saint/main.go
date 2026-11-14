@@ -163,6 +163,8 @@ func run(ctx context.Context, args []string) error {
 		return runHerdr(ctx, deps, args[1:])
 	case "allow":
 		return runAllow(st, args[1:], os.Stdout)
+	case "telemetry":
+		return runTelemetry(st, args[1:], os.Stdout)
 	default:
 		return fmt.Errorf("unknown subcommand %q", args[0])
 	}
@@ -195,8 +197,9 @@ Usage:
   saint proxy log            what the agents called, most recent first
   saint allow [<host>]       list, or save, hosts every session may reach
   saint allow -rm <host>     remove a saved host
+  saint telemetry [on|off]   allow or refuse Claude Code's own background traffic
   saint doctor               check the host, runtime, credentials and proxy
-  saint herdr open|pane|egress   herdr plugin entrypoints
+  saint herdr open|pane|egress|telemetry   herdr plugin entrypoints
 `
 
 func runDoctor(ctx context.Context, st *store.Store, kc *keychain.Keychain, containerPath, gitPath string, args []string) error {

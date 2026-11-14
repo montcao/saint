@@ -111,6 +111,15 @@ type Config struct {
 	ProxyAllowHosts []string `json:"proxy_allow_hosts,omitempty"`
 	ProxyDenyHosts  []string `json:"proxy_deny_hosts,omitempty"`
 
+	// ClaudeTelemetryOff turns off Claude Code's own background traffic: its
+	// metrics, error reports, auto-updater and other non-essential requests.
+	// New Claude sessions start with Claude Code's switches for each set, and
+	// the proxy refuses the hosts that traffic goes to (see
+	// proxy.ClaudeTelemetryHosts) for every session, running ones included.
+	// Off by default: the hosts are then on the shipped allowlist, so a new
+	// install is not asked about them.
+	ClaudeTelemetryOff bool `json:"claude_telemetry_off,omitempty"`
+
 	// ListStyle picks how the session list is drawn: "table" or "blocks".
 	//
 	// Empty means the table, so an existing config keeps the list it already

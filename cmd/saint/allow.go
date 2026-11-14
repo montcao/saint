@@ -27,6 +27,10 @@ func runAllow(st *store.Store, args []string, out io.Writer) error {
 			return err
 		}
 		fmt.Fprint(out, formatAllowlist(cfg.ProxyAllowHosts, cfg.ProxyDenyHosts, proxy.DefaultAllowedHosts()))
+		if cfg.ClaudeTelemetryOff {
+			fmt.Fprintf(out, "\nClaude Code telemetry is off, so these are refused whatever the lists say:\n  %s\nTurn it back on with saint telemetry on.\n",
+				strings.Join(proxy.ClaudeTelemetryHosts(), ", "))
+		}
 		return nil
 	case len(args) == 1 && !strings.HasPrefix(args[0], "-"):
 		added, err := st.AllowHost(args[0])

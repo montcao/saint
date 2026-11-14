@@ -186,18 +186,19 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (store.Session,
 	}
 
 	createOpts := sandbox.CreateOptions{
-		Resume:            req.Resume,
-		Prompt:            req.Prompt,
-		CPUs:              session.CPUs,
-		MemoryGB:          session.MemoryGB,
-		Name:              session.Name,
-		ProxyToken:        proxyToken,
-		ProxyEgress:       true,
-		Network:           session.Network,
-		SkipPermissions:   req.SkipPermissions,
-		AuthMode:          auth.Mode,
-		SubscriptionToken: auth.Token,
-		SkillMounts:       skillMounts,
+		Resume:             req.Resume,
+		Prompt:             req.Prompt,
+		CPUs:               session.CPUs,
+		MemoryGB:           session.MemoryGB,
+		Name:               session.Name,
+		ProxyToken:         proxyToken,
+		ProxyEgress:        true,
+		Network:            session.Network,
+		SkipPermissions:    req.SkipPermissions,
+		AuthMode:           auth.Mode,
+		SubscriptionToken:  auth.Token,
+		SkillMounts:        skillMounts,
+		ClaudeTelemetryOff: cfg.ClaudeTelemetryOff,
 	}
 	if err := s.Sandbox.Create(ctx, containerName(session.ID), session.Runtime, session.Repos, sessionDir, proxyURL, createOpts); err != nil {
 		discard()

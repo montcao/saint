@@ -21,6 +21,14 @@ title = "saint: new sandboxed Codex pane"
 contexts = ["workspace"]
 command = ["./saint", "herdr", "open", "codex"]
 
+# Flips whether Claude Code's own background traffic (metrics, error reports,
+# its auto-updater) may leave a session, and says which in a notification.
+[[actions]]
+id = "telemetry"
+title = "saint: turn Claude Code telemetry on or off"
+contexts = ["workspace"]
+command = ["./saint", "herdr", "telemetry"]
+
 # Opened by the actions above with SAINT_REPO and SAINT_RUNTIME set, or with
 # SAINT_SESSION set to reattach to an existing session.
 [[panes]]

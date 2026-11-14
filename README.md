@@ -75,6 +75,7 @@ saint rm <session>      # delete a session; your files are untouched
 saint doctor            # check the setup
 saint proxy log         # what each agent called, and every host decision
 saint allow [host]      # hosts every session may reach; -rm <host> removes one
+saint telemetry off     # refuse Claude Code's own telemetry and updater traffic
 saint new <repo>        # start a session without herdr
 ```
 

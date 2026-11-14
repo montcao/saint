@@ -207,6 +207,27 @@ applies from the next request. Every decision is in the request journal
 or no answer. saint sees the host and the bytes crossing; it never sees inside
 TLS, so a host you allow can be sent anything.
 
+### Claude Code's own traffic
+
+Claude Code sends metrics and error reports to a Datadog log intake and checks
+`downloads.claude.ai` for updates. Both ship allowed (`*.datadoghq.com`, every
+Datadog region) so a new install is not asked about them. To refuse them, run
+`saint telemetry off`, or the herdr action "saint: turn Claude Code telemetry
+on or off":
+
+- The proxy refuses `downloads.claude.ai` and `*.datadoghq.com` for every
+  session from the next request, ahead of anything you saved, without asking.
+- New Claude sessions start with `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING`,
+  `DISABLE_AUTOUPDATER` and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` set, so
+  Claude Code stops trying. A running session keeps its environment until it is
+  recreated; its attempts are refused meanwhile. The last switch also turns off
+  `/feedback` and Claude Code's feature flags.
+
+`saint telemetry on` (or the action again) allows them again. The setting is
+`claude_telemetry_off` in `~/.saint/config.json`. Allowing Datadog has a cost:
+its intake accepts logs for any Datadog account, so an allowed guest could send
+data to an account of its own.
+
 ## Sessions
 
 ### What a session can see

@@ -101,6 +101,11 @@ type CreateOptions struct {
 	// reaches the guest through an env file rather than argv.
 	SubscriptionToken string
 
+	// ClaudeTelemetryOff starts Claude Code with its own background traffic
+	// switched off: metrics, error reports, the auto-updater and other
+	// non-essential requests. Codex ignores it.
+	ClaudeTelemetryOff bool
+
 	// SkillMounts are host skill directories bound into the guest under
 	// /saint/skills/<name>. Always read-only, unlike Repo.ReadOnly: a skill
 	// is data the agent reads, never a place it writes back to.
