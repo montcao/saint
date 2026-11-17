@@ -62,8 +62,22 @@ description = "sandboxed agent"
 agent already running in a microVM. The first time, Claude Code asks you to
 accept bypass-permissions mode.
 
-Closing the pane leaves the agent running. `./saint ls` lists sessions, and
-`./saint attach <session>` reconnects.
+## Using saint in herdr
+
+- **Start a session:** press your key in a pane inside the project. saint
+  mounts that pane's folder, opens a split beside it and starts the agent
+  there. Bind a second key to `saint.new-codex` for Codex.
+- **Watch it like any agent:** herdr shows each session as working or idle.
+  **Blocked** from saint means one thing: the session wants a host you have not
+  allowed.
+- **Answer network questions:** a small pane opens below the blocked session,
+  without taking your focus. Go to it and press `a` to allow the host for every
+  session, or `d` to refuse this request. No answer within 2 minutes refuses.
+- **Close and come back:** closing the pane leaves the agent running.
+  `saint attach <session>` in any herdr pane reconnects, and network questions
+  follow it there. `saint ls` lists sessions.
+- **Turn off Claude Code's telemetry:** bind `saint.telemetry` to toggle it;
+  herdr shows a notification saying whether it is now on or off.
 
 ## Commands
 
@@ -87,9 +101,8 @@ saint new <repo>        # start a session without herdr
   sessions use.
 - **Network access is asked for.** Each session runs on its own network with
   no way out but saint's proxy. Provider APIs, GitHub and the main package
-  registries work out of the box; for any other host, the session's pane
-  asks you to **Allow always** or **Deny**. `saint allow` lists and edits
-  what you have allowed.
+  registries work out of the box; any other host is asked about in herdr, as
+  above. `saint allow` lists and edits what you have allowed.
 - **Not packaged yet.** saint builds from source and is unsigned, which is why
   the firewall step exists.
 
