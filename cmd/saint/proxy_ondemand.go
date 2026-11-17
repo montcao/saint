@@ -102,13 +102,23 @@ func newProxyStarter(st *store.Store) proxyStarter {
 			}
 			return st.Paths().ControlSocket, nil
 		},
-		probe:   pingProxy,
-		spawn:   func() (<-chan error, error) { return spawnDetachedProxy(logPath) },
+		probe: pingProxy,
+		spawn: func() (<-chan error, error) {
+			exe, err := ensureStableBinary(st)
+			if err != nil {
+				return nil, fmt.Errorf("prepare %s: %w", stableBinaryPath(st), err)
+			}
+			return spawnDetachedProxy(exe, logPath)
+		},
 		timeout: proxyStartTimeout,
 		poll:    200 * time.Millisecond,
 		logPath: logPath,
 	}
 }
+
+// errProxyUnreachable is a proxy that listens but cannot be reached from a
+// container: on macOS, the application firewall.
+var errProxyUnreachable = errors.New("the macOS firewall is blocking saint's proxy")
 
 // proxyReachTimeout bounds how long a pane waits for a session's listener to
 // accept a connection once the proxy says it is listening.
@@ -132,7 +142,7 @@ func serveSession(ctx context.Context, deps sessionDeps, sessionID string) error
 	deadline := time.Now().Add(deps.reachTimeout)
 	for !deps.probe(addr) {
 		if time.Now().After(deadline) {
-			return fmt.Errorf("the proxy listens on %s but it is not reachable; run `saint doctor` (the macOS firewall may be blocking saint)", addr)
+			return fmt.Errorf("%w: it listens on %s; run `saint firewall`, then reopen the session", errProxyUnreachable, addr)
 		}
 		select {
 		case <-ctx.Done():
@@ -143,14 +153,10 @@ func serveSession(ctx context.Context, deps sessionDeps, sessionID string) error
 	return nil
 }
 
-// spawnDetachedProxy runs `saint proxy` in a new session, writing to logPath.
+// spawnDetachedProxy runs `<exe> proxy` in a new session, writing to logPath.
 // The returned channel reports when it exits, for as long as this process
 // lives to hear it.
-func spawnDetachedProxy(logPath string) (<-chan error, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return nil, err
-	}
+func spawnDetachedProxy(exe, logPath string) (<-chan error, error) {
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
 		return nil, err
 	}

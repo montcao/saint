@@ -33,7 +33,10 @@ describes. When a runtime surprises you, measure it and add a section.
   `python3 -m http.server` is misleading, because `/usr/bin/python3` is
   usually already allowed. A successful bind proves nothing, which is why saint
   probes its own listener and `saint doctor` separates "not running" from
-  "bound but unreachable".
+  "bound but unreachable". Because the allowance follows the path, the proxy
+  runs from a fixed copy in the state directory, not from herdr's install
+  folder, which changes with every plugin update. Not measured: whether the
+  allowance survives the copy's bytes changing at the same path.
 - **A stopped service is not a missing runtime.** After a reboot the CLI can
   be on `PATH` with its service unregistered. Every command then exits 1, and
   only stderr tells the cases apart. `container ls` prints

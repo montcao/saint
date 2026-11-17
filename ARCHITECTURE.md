@@ -19,6 +19,7 @@ marked *checked* fail `make check` when broken (`internal/archtest`).
 | `internal/doctor` | `saint doctor`: checks of the host, the runtime, credentials and the proxy, with a fix where one is a command |
 | `cmd/saint` | the binary: CLI entry points, wiring, starting the proxy on demand, the proxy process (`proxy_run.go`: one listener per session network, and the control socket in `control.go` through which panes ask it to listen and prompts answer it), asking in herdr about a host (`egress_prompt.go`, `herdr_egress.go`), and the herdr plugin's action and pane entrypoints (`herdr.go`, with the manifest in `herdr-plugin.toml`) |
 | `internal/archtest` | structural tests for the boundaries below |
+| `scripts/plugin-build` | the build step `herdr plugin install` runs: a checksummed prebuilt binary built from the same commit, or `go build` |
 | `scripts/docs-check` | `make docs-check`: documents that point at files, targets or documents that do not exist |
 
 `docs/research/spikes.md` records what was measured rather than assumed, and on which runtime.

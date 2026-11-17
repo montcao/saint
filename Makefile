@@ -3,7 +3,6 @@
 BIN      := saint
 PREFIX   ?= $(HOME)/.local
 BINDIR   ?= $(PREFIX)/bin
-FIREWALL := /usr/libexec/ApplicationFirewall/socketfilterfw
 # One pinned commitlint for hooks, CI and people, reading commitlint.config.mjs.
 COMMITLINT := npx --yes -p @commitlint/cli@21.2.4 commitlint
 
@@ -63,12 +62,10 @@ commitlint-range:
 	@test -n "$(FROM)" -a -n "$(TO)" || { echo "usage: make commitlint-range FROM=<sha> TO=<sha>"; exit 2; }
 	$(COMMITLINT) --from "$(FROM)" --to "$(TO)"
 
-# Allow the installed binary to accept connections from containers.
-# Needs sudo. Re-run after reinstalling to a new path.
-allow-firewall:
-	@test -x $(BINDIR)/$(BIN) || { echo "run: make install"; exit 1; }
-	sudo $(FIREWALL) --add $(BINDIR)/$(BIN)
-	sudo $(FIREWALL) --unblockapp $(BINDIR)/$(BIN)
+# Allow the proxy to accept connections from containers. The proxy runs from
+# saint's copy in the state directory, so that is the path allowed. Needs sudo.
+allow-firewall: build
+	./$(BIN) firewall
 
 clean:
 	rm -f $(BIN)

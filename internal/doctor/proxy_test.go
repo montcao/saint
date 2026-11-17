@@ -42,13 +42,13 @@ func TestProxyReachableResultWhenNothingListening(t *testing.T) {
 	}
 }
 
-// The firewall remediation must name socketfilterfw and a concrete binary path,
-// since the allowlist is keyed by path.
+// The firewall remediation must name the command and what it runs, since it
+// asks for an administrator's password.
 func TestFirewallFixNamesSocketfilterfw(t *testing.T) {
 	t.Parallel()
 
 	fix := firewallFix()
-	for _, want := range []string{"socketfilterfw", "--add", "--unblockapp", "sudo"} {
+	for _, want := range []string{"saint firewall", "socketfilterfw", "--add", "--unblockapp", "sudo"} {
 		if !strings.Contains(fix, want) {
 			t.Fatalf("firewallFix() = %q, missing %q", fix, want)
 		}
