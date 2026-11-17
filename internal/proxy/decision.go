@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 )
@@ -55,14 +56,16 @@ type Decider interface {
 	Decide(ctx context.Context, sessionID, host string) Decision
 }
 
-// askTimeout bounds how long a guest waits for a person.
+// askTimeout bounds how long a guest waits for a person. The prompt opens
+// beside the session's pane without taking focus, so this is long enough to
+// notice a blocked pane and walk over to it, not just to press a key.
 //
 // A prompt that blocks forever is how an agent running unattended at three in
 // the morning becomes an agent that is simply stuck, with no error, no output
 // and nothing in the log to explain it. Past this the request is refused and
 // the refusal is recorded, so the host can be allowed in the morning and the
 // agent gets a clean network error in the meantime rather than a hang.
-const askTimeout = 20 * time.Second
+const askTimeout = 2 * time.Minute
 
 // policyDecider is the built-in policy: explicit rules first, then the default
 // allowlist, then ask.
@@ -80,31 +83,36 @@ type policyDecider struct {
 }
 
 func (d *policyDecider) Decide(ctx context.Context, sessionID, host string) Decision {
+	decision, _ := d.decide(ctx, sessionID, host)
+	return decision
+}
+
+// decide is Decide with the reason, for the record of what was decided.
+func (d *policyDecider) decide(ctx context.Context, sessionID, host string) (Decision, string) {
 	host = strings.ToLower(strings.TrimSpace(host))
 
-	// An explicit denial is final and is never asked about. A user who has
-	// refused a host once should not be asked again by the next session.
+	// An explicit denial is final and is never asked about.
 	if d.policy != nil {
 		for _, rule := range d.policy.Deny {
 			if matchHostRule(rule, host) {
-				return DecisionDeny
+				return DecisionDeny, ReasonRule
 			}
 		}
 		for _, rule := range d.policy.Allow {
 			if matchHostRule(rule, host) {
-				return DecisionAllow
+				return DecisionAllow, ReasonRule
 			}
 		}
 	}
 
 	for _, rule := range d.allowlist {
 		if matchHostRule(rule, host) {
-			return DecisionAllow
+			return DecisionAllow, ReasonDefault
 		}
 	}
 
 	if d.ask == nil {
-		return DecisionDeny
+		return DecisionDeny, ReasonUnanswered
 	}
 
 	wait := d.wait
@@ -114,12 +122,36 @@ func (d *policyDecider) Decide(ctx context.Context, sessionID, host string) Deci
 	ctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 	if answer := d.ask(ctx, sessionID, host); answer != DecisionAsk {
-		return answer
+		return answer, ReasonAnswer
 	}
 	// Nobody answered. A question that timed out is a refusal, not a
 	// permission: the safe direction when there is no person is the one that
 	// does not let traffic out.
-	return DecisionDeny
+	return DecisionDeny, ReasonUnanswered
+}
+
+// Reasons a forward-proxied host was allowed or refused, as DecisionEvent
+// reports them.
+const (
+	// ReasonRule: a saved allow or deny rule (HostPolicy) matched.
+	ReasonRule = "rule"
+	// ReasonDefault: the host is on the shipped allowlist.
+	ReasonDefault = "default"
+	// ReasonAnswer: a person was asked and answered.
+	ReasonAnswer = "answer"
+	// ReasonUnanswered: nobody answered in time, or there was nobody to ask.
+	ReasonUnanswered = "unanswered"
+	// ReasonObserved: enforcement is off, so nothing was ruled on.
+	ReasonObserved = "observed"
+)
+
+// DecisionEvent is one ruling on a forward-proxied host, for a caller to
+// record. It names the host, never a path, header or payload.
+type DecisionEvent struct {
+	SessionID string
+	Host      string
+	Decision  Decision
+	Reason    string
 }
 
 // defaultAllowedHosts are the hosts an agent needs before it can do anything at
@@ -156,4 +188,31 @@ var defaultAllowedHosts = []string{
 	"sum.golang.org",
 	"crates.io",
 	"static.crates.io",
+
+	// Claude Code's own background traffic, while it is allowed: see
+	// claudeTelemetryHosts.
+	"downloads.claude.ai",
+	"*.datadoghq.com",
+}
+
+// claudeTelemetryHosts are where Claude Code sends its own background traffic:
+// downloads.claude.ai for its updater, and a Datadog log intake for metrics and
+// error reports. Every new session reached both on its first start, so they
+// ship allowed rather than asking every new install about them.
+//
+// The Datadog rule covers the whole domain because the intake host differs by
+// Datadog region. Every subdomain there is Datadog's own, which is what the
+// rule against domain wildcards above protects. What it does not protect: a
+// Datadog intake accepts logs for any Datadog account, so a guest can send
+// data to an account of its choosing while these are allowed. Turning Claude
+// Code's telemetry off (store.Config.ClaudeTelemetryOff) refuses them all.
+var claudeTelemetryHosts = []string{
+	"downloads.claude.ai",
+	"*.datadoghq.com",
+}
+
+// ClaudeTelemetryHosts returns a copy of the hosts Claude Code's background
+// traffic goes to, for a caller that refuses them when that traffic is off.
+func ClaudeTelemetryHosts() []string {
+	return slices.Clone(claudeTelemetryHosts)
 }

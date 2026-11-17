@@ -221,6 +221,12 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// proxy's business - not its path, not whether that path is routable, and
 	// not a log line describing it.
 	sessionID, ok := p.authenticate(r.Header)
+	if ok && !inScope(r.Context(), sessionID) {
+		if p.cfg.Logf != nil {
+			p.cfg.Logf("session=%s refused: token presented on another session's network", sessionID)
+		}
+		ok = false
+	}
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return

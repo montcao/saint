@@ -270,7 +270,7 @@ func runAuth(ctx context.Context, st *store.Store, kc *keychain.Keychain, args [
 		if len(args) < 2 {
 			return errors.New("usage: saint auth mode auto|key|subscription")
 		}
-		return setAuthMode(st, cfg, args[1])
+		return setAuthMode(st, args[1])
 	case "clear":
 		if len(args) < 2 {
 			return errors.New("usage: saint auth clear claude|anthropic|openai")
@@ -297,15 +297,17 @@ func unknownCredential(name string) error {
 	return fmt.Errorf("unknown credential %q: expected %s", name, strings.Join(names, ", "))
 }
 
-func setAuthMode(st *store.Store, cfg store.Config, mode string) error {
+func setAuthMode(st *store.Store, mode string) error {
 	mode = strings.ToLower(strings.TrimSpace(mode))
 	switch mode {
 	case store.ProxyAuthAuto, store.ProxyAuthKey, store.ProxyAuthSubscription:
 	default:
 		return fmt.Errorf("unknown mode %q: expected auto, key or subscription", mode)
 	}
-	cfg.ProxyAuth = mode
-	if err := st.SaveConfig(cfg); err != nil {
+	if _, err := st.UpdateConfig(func(cfg *store.Config) error {
+		cfg.ProxyAuth = mode
+		return nil
+	}); err != nil {
 		return err
 	}
 	fmt.Printf("proxy_auth is now %s\n", mode)

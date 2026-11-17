@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 )
@@ -130,11 +131,13 @@ func TestWithNobodyToAskAnUnknownHostIsDenied(t *testing.T) {
 
 // The default allowlist must not contain a wildcard over a domain a third party
 // can create names under. `github.com` is a site; `*.github.io` is anybody's.
+// The one wildcard is Claude Code's telemetry domain, whose subdomains are all
+// Datadog's, and which a person can refuse as a whole.
 func TestTheDefaultAllowlistHasNoThirdPartyWildcards(t *testing.T) {
 	t.Parallel()
 
 	for _, host := range defaultAllowedHosts {
-		if len(host) > 0 && host[0] == '*' {
+		if len(host) > 0 && host[0] == '*' && !slices.Contains(claudeTelemetryHosts, host) {
 			t.Errorf("default allowlist entry %q is a wildcard", host)
 		}
 		for _, risky := range []string{".github.io", ".pages.dev", ".vercel.app", ".herokuapp.com"} {
@@ -142,5 +145,40 @@ func TestTheDefaultAllowlistHasNoThirdPartyWildcards(t *testing.T) {
 				t.Errorf("default allowlist entry %q is on a domain anybody can take a name under", host)
 			}
 		}
+	}
+}
+
+// Claude Code's background traffic ships allowed, with the Datadog rule
+// covering whichever regional intake it uses, and every telemetry host is on
+// the shipped list so that turning telemetry off has something to override.
+func TestClaudeTelemetryHostsShipAllowed(t *testing.T) {
+	t.Parallel()
+
+	d := &policyDecider{allowlist: defaultAllowedHosts}
+	for _, host := range []string{"downloads.claude.ai", "http-intake.logs.us5.datadoghq.com", "datadoghq.com"} {
+		if got := d.Decide(context.Background(), "s1", host); got != DecisionAllow {
+			t.Errorf("Decide(%s) = %v, want allow", host, got)
+		}
+	}
+	for _, host := range []string{"datadoghq.com.example", "notdatadoghq.com"} {
+		if got := d.Decide(context.Background(), "s1", host); got != DecisionDeny {
+			t.Errorf("Decide(%s) = %v, want deny (no one to ask)", host, got)
+		}
+	}
+	for _, host := range ClaudeTelemetryHosts() {
+		if !slices.Contains(defaultAllowedHosts, host) {
+			t.Errorf("telemetry host %s is not on the shipped allowlist", host)
+		}
+	}
+
+	// A deny rule for them wins over the shipped list without asking anyone.
+	asked := false
+	d = &policyDecider{
+		policy:    &HostPolicy{Deny: ClaudeTelemetryHosts()},
+		allowlist: defaultAllowedHosts,
+		ask:       func(context.Context, string, string) Decision { asked = true; return DecisionAllow },
+	}
+	if got := d.Decide(context.Background(), "s1", "http-intake.logs.us5.datadoghq.com"); got != DecisionDeny || asked {
+		t.Errorf("with telemetry refused: Decide = %v, asked = %v; want deny without asking", got, asked)
 	}
 }

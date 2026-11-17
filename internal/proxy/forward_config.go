@@ -37,6 +37,16 @@ type ForwardConfig struct {
 	// host, which is the default.
 	Policy *HostPolicy
 
+	// LivePolicy, when set, is called for each forward-proxied request and
+	// replaces Policy, so rules saved while the proxy runs - an "Allow always"
+	// answer, a `saint allow` - apply from the next request on. It runs on the
+	// request path, so it must be cheap (a cached read, not a parse per call).
+	LivePolicy func() *HostPolicy
+
+	// OnDecision, when set, receives every ruling on a forward-proxied host:
+	// allowed or refused, and why. It is observation and must not block.
+	OnDecision func(DecisionEvent)
+
 	// Enforce turns the host policy from a record into a control.
 	//
 	// Off, the proxy observes: every host a session reaches is recorded and
@@ -94,8 +104,9 @@ type ForwardConfig struct {
 // default, and what "off unless asked for" means here. A non-empty Allow
 // refuses every host it does not name.
 //
-// Remember what a denial is worth: it refuses traffic that came to saint. The
-// same guest can reach the same host by not using the proxy.
+// Remember what a denial is worth: it refuses traffic that came to saint. A
+// guest on its own internal network has no other way to the host; a guest on
+// a network with internet access can reach it by not using the proxy.
 type HostPolicy struct {
 	Allow []string
 	Deny  []string
@@ -183,17 +194,37 @@ func (p *Proxy) forwardSettings() ForwardSettings {
 // through here, because a policy that applied to one and not the other would be
 // a policy with a documented way around it.
 func (f *forwarder) allows(ctx context.Context, sessionID, host string) bool {
+	policy := f.cfg.Policy
+	if f.cfg.LivePolicy != nil {
+		policy = f.cfg.LivePolicy()
+	}
+
 	// Observation mode keeps the original behaviour exactly: explicit rules are
 	// honoured, and anything else passes. Turning enforcement on is what makes
 	// "not ruled on" mean no.
+	var decision Decision
+	var reason string
 	if !f.cfg.Enforce {
-		return f.cfg.Policy.permits(host)
+		decision, reason = DecisionAllow, ReasonObserved
+		if !policy.permits(host) {
+			decision, reason = DecisionDeny, ReasonRule
+		}
+	} else {
+		decider := &policyDecider{
+			policy:    policy,
+			allowlist: defaultAllowedHosts,
+			ask:       f.cfg.Ask,
+		}
+		decision, reason = decider.decide(ctx, sessionID, host)
 	}
+	if f.cfg.OnDecision != nil {
+		f.cfg.OnDecision(DecisionEvent{SessionID: sessionID, Host: host, Decision: decision, Reason: reason})
+	}
+	return decision == DecisionAllow
+}
 
-	decider := &policyDecider{
-		policy:    f.cfg.Policy,
-		allowlist: defaultAllowedHosts,
-		ask:       f.cfg.Ask,
-	}
-	return decider.Decide(ctx, sessionID, host) == DecisionAllow
+// DefaultAllowedHosts returns a copy of the shipped allowlist, so a caller can
+// show it beside the saved one.
+func DefaultAllowedHosts() []string {
+	return slices.Clone(defaultAllowedHosts)
 }

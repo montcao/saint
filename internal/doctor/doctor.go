@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -44,6 +43,11 @@ type Doctor struct {
 	Store         *store.Store
 	Keychain      *keychain.Keychain
 	RepoRoot      string
+
+	// ProxyStatus asks the running proxy, over its control socket, which
+	// addresses it listens on. An error means no proxy answers. Nil skips
+	// the proxy checks.
+	ProxyStatus func(ctx context.Context) (listeners []string, err error)
 }
 
 func (d *Doctor) Run(ctx context.Context) ([]Result, error) {
@@ -268,11 +272,13 @@ func requireExecutable(path string) error {
 
 // proxyResults checks that the API proxy can actually be reached by a guest.
 //
-// Two things go wrong silently here. The bridge gateway is the only host address
-// a container can reach, so if it cannot be discovered no session gets proxied
-// and agents fall back to their own credentials. And a proxy pinned to loopback
-// binds fine and looks healthy from the host while being invisible to every
-// guest.
+// The container gateway check is the runtime's own network: without it, no
+// network a session creates will have one either. The bind check matters only
+// for sessions from before per-session networks, which reach the proxy at
+// proxy_bind; a proxy pinned to loopback binds fine and is invisible to every
+// guest. Then the running proxy is asked, over its control socket, which
+// session networks it serves, and each is probed, because a listener the
+// macOS firewall blocks looks healthy until something connects.
 func (d *Doctor) proxyResults(ctx context.Context, cfg store.Config, cfgErr error) []Result {
 	if cfgErr != nil {
 		return []Result{{
@@ -284,7 +290,6 @@ func (d *Doctor) proxyResults(ctx context.Context, cfg store.Config, cfgErr erro
 	}
 
 	network := cfg.ProxyNetworkOrDefault()
-	port := cfg.ProxyPort
 
 	gateway, gwErr := sandbox.GatewayAddr(ctx, d.ContainerPath, network)
 	results := []Result{{
@@ -302,11 +307,26 @@ func (d *Doctor) proxyResults(ctx context.Context, cfg store.Config, cfgErr erro
 			store.ProxyBindAuto, d.Store.Paths().ConfigPath),
 	})
 
-	if gwErr == nil {
-		addr := net.JoinHostPort(gateway, strconv.Itoa(port))
+	if d.ProxyStatus == nil {
+		return results
+	}
+	listeners, err := d.ProxyStatus(ctx)
+	if err != nil {
+		return append(results, Result{
+			Name:   "proxy running",
+			OK:     false,
+			Detail: "no proxy answers on " + d.Store.Paths().ControlSocket,
+			Fix:    "open a saint pane in herdr, or run: saint proxy",
+		})
+	}
+	detail := "control socket answers; no session network served yet"
+	if len(listeners) > 0 {
+		detail = "control socket answers; serving " + strings.Join(listeners, ", ")
+	}
+	results = append(results, Result{Name: "proxy running", OK: true, Detail: detail})
+	for _, addr := range listeners {
 		results = append(results, proxyReachableResult(addr))
 	}
-
 	return results
 }
 

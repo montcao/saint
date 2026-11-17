@@ -12,7 +12,7 @@ import (
 // reached; nothing there tells a guest to use it. The convention that does is
 // the proxy environment variables, and this is where saint writes them.
 //
-// It is opt-in per install (store.Config.ProxyGuestEgress) and every variable
+// Every new session sets it (CreateOptions.ProxyEgress), and every variable
 // below is written only when it is on. There is no partial state: either the
 // guest's environment is untouched and its traffic leaves the microVM the way
 // it always did, or all of these are set and consistent with each other.

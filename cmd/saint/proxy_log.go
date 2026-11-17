@@ -13,6 +13,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/montcao/saint/internal/proxy"
 	"github.com/montcao/saint/internal/store"
 )
 
@@ -199,8 +200,28 @@ func journalSummary(rec journalRecord) (what, result string) {
 
 	case journalKindDrop:
 		return "dropped", fmt.Sprintf("%d records (journal buffer full)", rec.Dropped)
+
+	case journalKindEgress:
+		return "egress " + dashIfEmpty(rec.Path), dashIfEmpty(rec.Decision) + " (" + egressReasonText(rec.Reason) + ")"
 	}
 	return dashIfEmpty(rec.Kind), "-"
+}
+
+// egressReasonText says why a host was allowed or refused, in words.
+func egressReasonText(reason string) string {
+	switch reason {
+	case proxy.ReasonDefault:
+		return "shipped allowlist"
+	case proxy.ReasonRule:
+		return "saved rule"
+	case proxy.ReasonAnswer:
+		return "answered"
+	case proxy.ReasonUnanswered:
+		return "no answer"
+	case proxy.ReasonObserved:
+		return "not enforced"
+	}
+	return dashIfEmpty(reason)
 }
 
 func formatJournalDuration(ms int64) string {

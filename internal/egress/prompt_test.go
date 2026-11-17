@@ -7,135 +7,193 @@ import (
 	"time"
 )
 
+// waitForQuestion returns the first open question for a session.
+func waitForQuestion(t *testing.T, b *Broker, sessionID string) Question {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if pending := b.Pending(sessionID); len(pending) > 0 {
+			return pending[0]
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("no question arrived")
+	return Question{}
+}
+
 // The answer a person gives is the answer the guest gets.
 func TestAnAnsweredQuestionReturnsThatAnswer(t *testing.T) {
 	t.Parallel()
 
-	cases := map[Answer]bool{
-		AnswerOnce:    true,
-		AnswerSession: true,
-		AnswerAlways:  true,
-		AnswerDeny:    false,
-		AnswerNever:   false,
-	}
-
-	for answer, wantAllow := range cases {
+	for _, answer := range []Answer{AnswerAlways, AnswerDeny} {
 		b := New(nil)
-		var wg sync.WaitGroup
-		wg.Add(1)
+		got := make(chan Answer, 1)
+		go func() { got <- b.Ask(context.Background(), "s1", "paste.example") }()
 
-		var allow bool
-		var remember Answer
-		go func() {
-			defer wg.Done()
-			allow, remember = b.Ask(context.Background(), "s1", "paste.example")
-		}()
-
-		id := waitForQuestion(t, b)
-		b.Answer(id, answer)
-		wg.Wait()
-
-		if allow != wantAllow {
-			t.Errorf("answer %v gave allow=%v, want %v", answer, allow, wantAllow)
+		q := waitForQuestion(t, b, "s1")
+		if !b.Answer(q.ID, answer) {
+			t.Fatal("Answer() reported the open question as gone")
 		}
-		if remember != answer {
-			t.Errorf("remember = %v, want %v", remember, answer)
+		if g := <-got; g != answer {
+			t.Errorf("Ask() = %v, want %v", g, answer)
 		}
 	}
 }
 
-// A guest that stopped waiting takes its question with it. Leaving it on screen
-// would invite a person to decide something that no longer matters.
+// A guest that stopped waiting takes its question with it, and that is a
+// refusal nobody chose.
 func TestAGuestGivingUpRemovesTheQuestion(t *testing.T) {
 	t.Parallel()
 
 	b := New(nil)
 	ctx, cancel := context.WithCancel(context.Background())
+	got := make(chan Answer, 1)
+	go func() { got <- b.Ask(ctx, "s1", "paste.example") }()
 
-	done := make(chan bool, 1)
-	go func() {
-		allow, _ := b.Ask(ctx, "s1", "paste.example")
-		done <- allow
-	}()
-
-	waitForQuestion(t, b)
+	q := waitForQuestion(t, b, "s1")
 	cancel()
-
+	if g := <-got; g != AnswerUnanswered {
+		t.Errorf("Ask() = %v after the guest gave up, want no answer", g)
+	}
+	if pending := b.Pending(""); len(pending) != 0 {
+		t.Errorf("pending = %+v, want none", pending)
+	}
 	select {
-	case allow := <-done:
-		if allow {
-			t.Error("an abandoned question was answered as allow")
+	case <-q.Done():
+	default:
+		t.Error("a withdrawn question's Done channel is still open")
+	}
+	if b.Answer(q.ID, AnswerAlways) {
+		t.Error("answering a withdrawn question reported success")
+	}
+}
+
+// The same host asked about by the same session joins the open question: a
+// person is asked once for a burst of connections to one registry.
+func TestConcurrentAsksForOneHostShareAQuestion(t *testing.T) {
+	t.Parallel()
+
+	b := New(nil)
+	const askers = 5
+	answers := make(chan Answer, askers)
+	var started sync.WaitGroup
+	started.Add(askers)
+	for range askers {
+		go func() {
+			started.Done()
+			answers <- b.Ask(context.Background(), "s1", "registry.example")
+		}()
+	}
+	started.Wait()
+	q := waitForQuestion(t, b, "s1")
+	// Give the joiners time to arrive; a joiner that opened its own question
+	// would show up here.
+	time.Sleep(20 * time.Millisecond)
+	if pending := b.Pending("s1"); len(pending) != 1 {
+		t.Fatalf("pending = %d questions, want 1 shared question", len(pending))
+	}
+	b.Answer(q.ID, AnswerAlways)
+	for range askers {
+		if got := <-answers; got != AnswerAlways {
+			t.Errorf("a joined asker got %v, want allow always", got)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("Ask() did not return when the guest gave up")
-	}
-
-	if got := len(b.Pending()); got != 0 {
-		t.Errorf("%d questions still pending after the guest gave up", got)
 	}
 }
 
-// Answering a question that has already gone is a person pressing a key against
-// a prompt that was true when they read it. It must not panic or block.
-func TestAnsweringAVanishedQuestionIsHarmless(t *testing.T) {
+// Questions are per session: another session asking about the same host is
+// asked separately, because it is a different agent doing a different thing.
+func TestSessionsAreAskedSeparately(t *testing.T) {
 	t.Parallel()
 
 	b := New(nil)
-	b.Answer(9999, AnswerAlways)
-	if got := len(b.Pending()); got != 0 {
-		t.Errorf("Pending() = %d, want 0", got)
+	go b.Ask(context.Background(), "s1", "paste.example")
+	go b.Ask(context.Background(), "s2", "paste.example")
+	waitForQuestion(t, b, "s1")
+	waitForQuestion(t, b, "s2")
+	if got := len(b.Pending("s1")); got != 1 {
+		t.Errorf("s1 has %d questions, want 1", got)
 	}
+	b.DenyAll("s1")
+	b.DenyAll("s2")
 }
 
-// Questions are answered oldest first, because that is the guest that has been
-// blocked longest.
-func TestPendingIsOldestFirst(t *testing.T) {
+// DenyAll refuses every open question for one session and no other.
+func TestDenyAllIsPerSession(t *testing.T) {
 	t.Parallel()
 
 	b := New(nil)
-	for _, host := range []string{"first.example", "second.example", "third.example"} {
-		go b.Ask(context.Background(), "s1", host)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for len(b.Pending()) < 3 && time.Now().Before(deadline) {
+	s1 := make(chan Answer, 2)
+	go func() { s1 <- b.Ask(context.Background(), "s1", "a.example") }()
+	go func() { s1 <- b.Ask(context.Background(), "s1", "b.example") }()
+	s2 := make(chan Answer, 1)
+	go func() { s2 <- b.Ask(context.Background(), "s2", "a.example") }()
+
+	waitForQuestion(t, b, "s2")
+	deadline := time.Now().Add(2 * time.Second)
+	for len(b.Pending("s1")) < 2 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
 
-	pending := b.Pending()
-	if len(pending) != 3 {
-		t.Fatalf("Pending() has %d questions, want 3", len(pending))
-	}
-	for i := 1; i < len(pending); i++ {
-		if pending[i].ID < pending[i-1].ID {
-			t.Errorf("questions are not oldest first: %v", pending)
+	b.DenyAll("s1")
+	for range 2 {
+		if got := <-s1; got != AnswerUnanswered {
+			t.Errorf("s1 got %v, want no answer", got)
 		}
+	}
+	if pending := b.Pending("s2"); len(pending) != 1 {
+		t.Fatalf("s2 pending = %d, want its question untouched", len(pending))
+	}
+	b.DenyAll("s2")
+	<-s2
+}
+
+// notify names the session whose questions changed, on arrival and on answer.
+func TestNotifyNamesTheSession(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var seen []string
+	b := New(func(sessionID string) {
+		mu.Lock()
+		seen = append(seen, sessionID)
+		mu.Unlock()
+	})
+	done := make(chan struct{})
+	go func() { b.Ask(context.Background(), "s7", "paste.example"); close(done) }()
+	q := waitForQuestion(t, b, "s7")
+	b.Answer(q.ID, AnswerDeny)
+	<-done
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 2 || seen[0] != "s7" || seen[1] != "s7" {
+		t.Errorf("notify calls = %q, want s7 on arrival and on answer", seen)
 	}
 }
 
-// A nil broker is what a headless saint has, and it must deny rather than panic.
+// The deadline a guest waits under is carried on the question, so a prompt can
+// say when no answer becomes a denial.
+func TestTheQuestionCarriesTheDeadline(t *testing.T) {
+	t.Parallel()
+
+	b := New(nil)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	go b.Ask(ctx, "s1", "paste.example")
+	q := waitForQuestion(t, b, "s1")
+	want, _ := ctx.Deadline()
+	if !q.Deadline.Equal(want) {
+		t.Errorf("deadline = %v, want %v", q.Deadline, want)
+	}
+	b.DenyAll("s1")
+}
+
+// A nil broker is "nobody to ask", which is a refusal.
 func TestANilBrokerDenies(t *testing.T) {
 	t.Parallel()
 
 	var b *Broker
-	if allow, _ := b.Ask(context.Background(), "s1", "paste.example"); allow {
-		t.Error("a nil broker allowed a host")
+	if got := b.Ask(context.Background(), "s1", "paste.example"); got != AnswerUnanswered {
+		t.Errorf("nil broker Ask() = %v, want deny", got)
 	}
-	if got := b.Pending(); got != nil {
-		t.Errorf("Pending() = %v, want nil", got)
-	}
-	b.Answer(1, AnswerAlways)
-}
-
-func waitForQuestion(t *testing.T, b *Broker) uint64 {
-	t.Helper()
-
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if pending := b.Pending(); len(pending) > 0 {
-			return pending[0].ID
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatal("no question arrived")
-	return 0
 }
