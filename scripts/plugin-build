@@ -1,0 +1,66 @@
+#!/bin/sh
+# Builds saint for `herdr plugin install`, which runs this from the plugin's
+# checkout.
+#
+# A prebuilt binary is used when the release for this plugin version has one,
+# its checksum matches, and it was built from the commit being installed.
+# Otherwise saint is built from source with Go. herdr does not install
+# toolchains, so with neither, this says what to install.
+#
+# SAINT_RELEASE_BASE overrides where releases are fetched from, for testing.
+
+set -u
+
+asset=saint-darwin-arm64
+version=$(sed -n 's/^version *= *"\(.*\)"$/\1/p' herdr-plugin.toml)
+base=${SAINT_RELEASE_BASE:-https://github.com/montcao/saint/releases/download}
+head=$(git rev-parse HEAD 2>/dev/null || true)
+
+try_prebuilt() {
+	[ "$(uname -s)/$(uname -m)" = "Darwin/arm64" ] || return 1
+	[ -n "$version" ] || return 1
+	command -v curl >/dev/null 2>&1 || return 1
+
+	tmp=$(mktemp -d) || return 1
+	trap 'rm -rf "$tmp"' EXIT
+	url="$base/v$version/$asset"
+	curl -fsSL -o "$tmp/$asset" "$url" 2>/dev/null || {
+		echo "saint: no prebuilt binary for v$version; building from source"
+		return 1
+	}
+	curl -fsSL -o "$tmp/$asset.sha256" "$url.sha256" 2>/dev/null || {
+		echo "saint: the v$version release has no checksum; building from source"
+		return 1
+	}
+	want=$(cut -d' ' -f1 <"$tmp/$asset.sha256")
+	got=$(shasum -a 256 "$tmp/$asset" | cut -d' ' -f1)
+	if [ -z "$want" ] || [ "$want" != "$got" ]; then
+		echo "saint: the v$version binary does not match its checksum; building from source"
+		return 1
+	fi
+	chmod 0755 "$tmp/$asset"
+	if [ -n "$head" ]; then
+		built=$("$tmp/$asset" version 2>/dev/null | sed -n 's/^commit: //p')
+		if [ "$built" != "$head" ]; then
+			echo "saint: the v$version binary was built from ${built:-an unknown commit}, not $head; building from source"
+			return 1
+		fi
+	fi
+	mv "$tmp/$asset" ./saint || return 1
+	echo "saint: installed the prebuilt v$version binary"
+	return 0
+}
+
+if try_prebuilt; then
+	exit 0
+fi
+rm -rf "${tmp:-}"
+
+if command -v go >/dev/null 2>&1; then
+	echo "saint: building from source with $(go version)"
+	exec go build -o saint ./cmd/saint
+fi
+
+echo "saint: there is no prebuilt binary for this version and Go is not installed." >&2
+echo "Install Go from https://go.dev/dl, then run: herdr plugin install montcao/saint" >&2
+exit 1

@@ -13,7 +13,11 @@ from, so the panes and the proxy they start all see it. Paths below that say
 
 ## Known limits
 
-- No signed releases, so `make allow-firewall` is a required install step.
+- No signed releases, so the first session asks to let saint through the macOS
+  firewall (`saint firewall`, with your password). The proxy runs from a fixed
+  copy at `~/.saint/bin/saint` so the exception is not tied to herdr's install
+  folder; whether it survives that copy being replaced by an update is not yet
+  measured.
 - Token counts carry no cost figure, and will not match the agent's own (see
   [What the token counts mean](#what-the-token-counts-mean)).
 - OpenAI context windows are unlisted, so Codex sessions show counts without a

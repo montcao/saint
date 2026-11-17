@@ -172,12 +172,20 @@ type sessionDeps struct {
 	checkService func(context.Context) error
 	// pane is the herdr pane this process runs in, if any.
 	pane func() *store.HerdrPane
+	// firstRun sets a new install up from the first pane that needs it.
+	firstRun firstRun
 }
 
 // runHerdrPane is the pane entrypoint. herdr closes a pane when its command
 // exits, so every failure waits for Enter: an error that vanishes with its
 // pane is an error nobody read.
 func runHerdrPane(ctx context.Context, deps sessionDeps, in io.Reader, out io.Writer) error {
+	// Keep the state directory's copy of saint current, so the CLI there and
+	// the next proxy run this version after a plugin update. A failure only
+	// leaves the old copy; the proxy start reports it if it matters.
+	if deps.svc != nil {
+		_, _ = ensureStableBinary(deps.svc.Store)
+	}
 	reader := bufio.NewReader(in)
 	err := herdrPane(ctx, deps, reader, out)
 	if err != nil {
@@ -296,6 +304,9 @@ func startAndAttach(ctx context.Context, deps sessionDeps, in *bufio.Reader, out
 	if rt == "" {
 		rt = sandbox.RuntimeClaude
 	}
+	if err := deps.firstRun.prepare(ctx, rt, in, out); err != nil {
+		return err
+	}
 	fmt.Fprintf(out, "saint: starting a %s microVM on its own network\n", rt)
 	created, err := deps.svc.Create(ctx, req)
 	if err != nil {
@@ -307,7 +318,15 @@ func startAndAttach(ctx context.Context, deps sessionDeps, in *bufio.Reader, out
 	// (docs/research/spikes.md). The guest's init waits for the proxy before
 	// starting the agent, so the agent's first request finds a listener.
 	fmt.Fprintln(out, "saint: starting the credential proxy")
-	if err := serveSession(ctx, deps, created.ID); err != nil {
+	err = serveSession(ctx, deps, created.ID)
+	if errors.Is(err, errProxyUnreachable) && deps.firstRun.fixFirewall != nil &&
+		confirm(in, out, "the macOS firewall is blocking saint's proxy. Allow it now? sudo asks for your password, once.") {
+		if ferr := deps.firstRun.fixFirewall(ctx, in, out); ferr != nil {
+			return fmt.Errorf("allow saint through the firewall: %w", ferr)
+		}
+		err = serveSession(ctx, deps, created.ID)
+	}
+	if err != nil {
 		return fmt.Errorf("%w (session %s has no network access; reopen it after fixing this)", err, created.Name)
 	}
 	return attachHere(deps, created.ID)

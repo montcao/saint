@@ -15,40 +15,16 @@ microVM, with your project mounted in and your API key kept out of reach.
 ## Get started
 
 You need a Mac with Apple silicon on macOS 26 or newer, Apple's
-[`container`](https://github.com/apple/container) 1.3.0+, herdr 0.9.5+, and Go.
+[`container`](https://github.com/apple/container) 1.3.0+, herdr 0.9.5+, and Go
+(until saint publishes prebuilt releases).
 
-**1. Build saint and its agent images.**
-
-```bash
-git clone https://github.com/montcao/saint && cd saint
-make build
-container system start
-./saint doctor --build-images
-```
-
-`saint doctor` checks the whole setup and prints the fix for anything missing.
-
-**2. Let the proxy through the macOS firewall.**
+**1. Install the plugin.**
 
 ```bash
-make allow-firewall BINDIR="$PWD"
+herdr plugin install montcao/saint
 ```
 
-Without this, agents hang on every API call. Run it again after a rebuild if
-they do.
-
-**3. Add a credential.** Once per install; sessions never ask.
-
-```bash
-./saint auth claude      # your Claude plan, via a token from `claude setup-token`
-./saint auth anthropic   # or an Anthropic API key
-```
-
-**4. Add saint to herdr** and bind a key in `~/.config/herdr/config.toml`:
-
-```bash
-herdr plugin link "$PWD"
-```
+**2. Bind a key** in `~/.config/herdr/config.toml`:
 
 ```toml
 [[keys.command]]
@@ -58,9 +34,12 @@ command = "saint.new"          # saint.new-codex for Codex
 description = "sandboxed agent"
 ```
 
-**5. Press the key** in any pane inside your project. A new pane opens with the
-agent already running in a microVM. The first time, Claude Code asks you to
-accept bypass-permissions mode.
+**3. Press the key** in any pane inside your project. The first time, the pane
+sets saint up as it goes, one question each: start Apple's container service,
+build the agent image (a few minutes, once), add a credential (your Claude plan
+token or an API key), and let saint through the macOS firewall (your password,
+once). Then the agent starts, and asks you to accept bypass-permissions mode.
+Every press after that goes straight to the agent.
 
 ## Using saint in herdr
 
@@ -81,6 +60,9 @@ accept bypass-permissions mode.
 
 ## Commands
 
+The first session puts the `saint` command in `~/.saint/bin`; add that to your
+`PATH` to use these.
+
 ```bash
 saint ls                # sessions and their state
 saint attach <session>  # reconnect to a session
@@ -90,6 +72,7 @@ saint doctor            # check the setup
 saint proxy log         # what each agent called, and every host decision
 saint allow [host]      # hosts every session may reach; -rm <host> removes one
 saint telemetry off     # refuse Claude Code's own telemetry and updater traffic
+saint firewall          # let the proxy through the macOS firewall again
 saint new <repo>        # start a session without herdr
 ```
 
@@ -113,7 +96,8 @@ billing modes, secret stores, mount limits and the request journal.
 ## Contributing
 
 Start with [`AGENTS.md`](AGENTS.md), and run `make check` before opening a pull
-request.
+request. To run your checkout as the plugin, use `make build` and
+`herdr plugin link "$PWD"` instead of `herdr plugin install`.
 
 ## License
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -130,6 +131,15 @@ func run(ctx context.Context, args []string) error {
 			return err
 		},
 		pane: currentHerdrPane,
+		firstRun: firstRun{
+			imagePresent:    runtimeImageExists(containerPath),
+			buildImage:      buildRuntimeImage(containerPath),
+			credentialReady: credentialResolves(st, kc),
+			addCredential:   askForCredential(st, kc),
+			fixFirewall: func(ctx context.Context, in io.Reader, out io.Writer) error {
+				return runFirewall(ctx, st, in, out)
+			},
+		},
 	}
 
 	if len(args) == 0 || args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
@@ -165,6 +175,10 @@ func run(ctx context.Context, args []string) error {
 		return runAllow(st, args[1:], os.Stdout)
 	case "telemetry":
 		return runTelemetry(st, args[1:], os.Stdout)
+	case "firewall":
+		return runFirewall(ctx, st, os.Stdin, os.Stdout)
+	case "version":
+		return runVersion(os.Stdout)
 	default:
 		return fmt.Errorf("unknown subcommand %q", args[0])
 	}
@@ -199,6 +213,8 @@ Usage:
   saint allow -rm <host>     remove a saved host
   saint telemetry [on|off]   allow or refuse Claude Code's own background traffic
   saint doctor               check the host, runtime, credentials and proxy
+  saint firewall             let the proxy through the macOS firewall (sudo)
+  saint version              the commit this binary was built from
   saint herdr open|pane|egress|telemetry   herdr plugin entrypoints
 `
 

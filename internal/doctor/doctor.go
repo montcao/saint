@@ -364,16 +364,12 @@ func proxyReachableResult(addr string) Result {
 	}
 }
 
-// firewallFix names the exact commands that let saint accept connections on the
-// container bridge. Both require admin privileges, so they are printed for the
-// user to run rather than attempted.
+// firewallFix names the command that lets saint accept connections on the
+// container bridge. It needs an administrator, so it is printed for the user
+// to run rather than attempted. The proxy runs from a fixed copy of saint in
+// the state directory, and that copy is what the firewall must allow.
 func firewallFix() string {
-	const fw = "/usr/libexec/ApplicationFirewall/socketfilterfw"
-	exe, err := os.Executable()
-	if err != nil || exe == "" {
-		exe = "$(command -v saint)"
-	}
-	return fmt.Sprintf("sudo %s --add %s && sudo %s --unblockapp %s", fw, exe, fw, exe)
+	return "saint firewall (runs sudo socketfilterfw --add and --unblockapp on the proxy's copy of saint in the state directory)"
 }
 
 // localListener reports whether this host has a process listening on addr.

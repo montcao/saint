@@ -4,10 +4,11 @@ version = "0.1.0"
 min_herdr_version = "0.9.5"
 description = "Open panes whose agent runs in an Apple container microVM, with credentials held by a host proxy."
 
-# herdr runs this once after `herdr plugin install`. A linked checkout needs
-# `make build` run by hand.
+# herdr runs this once at `herdr plugin install`: a prebuilt binary when the
+# release has one for this commit, otherwise a build from source with Go. A
+# linked checkout needs `make build` run by hand.
 [[build]]
-command = ["make", "build"]
+command = ["sh", "scripts/plugin-build"]
 
 [[actions]]
 id = "new"
