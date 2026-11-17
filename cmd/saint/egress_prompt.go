@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -63,7 +65,11 @@ type egressPrompter struct {
 	allow   func(host string) error
 	// forget clears a session's herdr pane record if it still names pane,
 	// once herdr has said the pane is gone.
-	forget   func(sessionID string, pane store.HerdrPane)
+	forget func(sessionID string, pane store.HerdrPane)
+	// terminal returns the ID of the terminal herdr now has in a pane, so a
+	// pane ID that came back after a herdr restart is not taken for the
+	// session's own pane.
+	terminal func(ctx context.Context, pane store.HerdrPane) (string, error)
 	run      herdrRunner
 	stateDir string
 	logf     func(string, ...any)
@@ -114,6 +120,7 @@ func newEgressPrompter(st *store.Store, logf func(string, ...any)) *egressPrompt
 				}
 			})
 		},
+		terminal: herdrPaneTerminal,
 		run:      runHerdrAt,
 		stateDir: st.Paths().Root,
 		logf:     logf,
@@ -188,6 +195,18 @@ func (p *egressPrompter) sync(sessionID string) {
 		return
 	}
 
+	// Once per round of questions, before anything is shown: the recorded pane
+	// must still be this session's. A pane killed outright never cleared its
+	// record, and herdr gives its ID to a new pane after a restart, so asking
+	// there would put the question in front of the wrong session.
+	if reported == "" && !p.paneIsTheSessions(sessionID, pane) {
+		p.mu.Lock()
+		st.pane = store.HerdrPane{}
+		p.mu.Unlock()
+		p.broker.DenyAll(sessionID)
+		return
+	}
+
 	message := blockedMessage(pending)
 	if message != reported {
 		if err := p.herdr(pane, reportBlockedArgs(pane.PaneID, agent, message)...); err != nil {
@@ -225,6 +244,35 @@ func (p *egressPrompter) sync(sessionID string) {
 		p.mu.Unlock()
 		p.broker.DenyAll(sessionID)
 	}
+}
+
+// paneIsTheSessions checks the recorded pane against herdr. A record that
+// cannot be checked is not trusted: the session's requests are refused, the
+// record is cleared, and the reason goes to the proxy's output. Reattaching
+// the session records its pane again.
+func (p *egressPrompter) paneIsTheSessions(sessionID string, pane store.HerdrPane) bool {
+	reason := ""
+	if pane.TerminalID == "" {
+		reason = "the pane was recorded without herdr's terminal ID"
+	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), herdrCallTimeout)
+		defer cancel()
+		terminal, err := p.terminal(ctx, pane)
+		switch {
+		case err != nil:
+			reason = fmt.Sprintf("herdr pane get: %v", err)
+		case terminal != pane.TerminalID:
+			reason = fmt.Sprintf("pane %s now holds a different terminal", pane.PaneID)
+		}
+	}
+	if reason == "" {
+		return true
+	}
+	p.logf("session=%s %s; denying its pending hosts until it is reattached", sessionID, reason)
+	if p.forget != nil {
+		p.forget(sessionID, pane)
+	}
+	return false
 }
 
 func (p *egressPrompter) herdr(pane store.HerdrPane, args ...string) error {
@@ -368,19 +416,52 @@ func promptOpenArgs(paneID, sessionID, stateDir string) []string {
 // been started from a pane of a different herdr server, so the herdr variables
 // it inherited are dropped and the pane's own socket is used.
 func runHerdrAt(ctx context.Context, pane store.HerdrPane, args ...string) error {
+	_, err := herdrOutputAt(ctx, pane, args...)
+	return err
+}
+
+// herdrOutputAt is runHerdrAt returning what herdr printed.
+func herdrOutputAt(ctx context.Context, pane store.HerdrPane, args ...string) ([]byte, error) {
 	bin := pane.BinPath
 	if bin == "" {
 		bin = "herdr"
 	}
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = herdrEnv(os.Environ(), pane)
-	var stderr bytes.Buffer
-	cmd.Stdout = &stderr
-	cmd.Stderr = &stderr
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(output.String()))
 	}
-	return nil
+	return output.Bytes(), nil
+}
+
+// herdrPaneTerminal asks herdr which terminal a pane holds now.
+func herdrPaneTerminal(ctx context.Context, pane store.HerdrPane) (string, error) {
+	out, err := herdrOutputAt(ctx, pane, "pane", "get", pane.PaneID)
+	if err != nil {
+		return "", err
+	}
+	return parsePaneTerminal(out)
+}
+
+// parsePaneTerminal reads the terminal ID from `herdr pane get`.
+func parsePaneTerminal(out []byte) (string, error) {
+	var reply struct {
+		Result struct {
+			Pane struct {
+				TerminalID string `json:"terminal_id"`
+			} `json:"pane"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out, &reply); err != nil {
+		return "", fmt.Errorf("reading herdr pane get: %w", err)
+	}
+	if reply.Result.Pane.TerminalID == "" {
+		return "", errors.New("herdr pane get named no terminal")
+	}
+	return reply.Result.Pane.TerminalID, nil
 }
 
 func herdrEnv(environ []string, pane store.HerdrPane) []string {

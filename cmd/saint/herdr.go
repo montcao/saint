@@ -247,17 +247,27 @@ func attachHere(deps sessionDeps, sessionID string) error {
 }
 
 // currentHerdrPane is the herdr pane this process runs in, from the variables
-// herdr sets in every pane, or nil outside herdr.
+// herdr sets in every pane, or nil outside herdr. It records the pane's
+// terminal too, which the proxy checks before asking anything there; without
+// it the session's network questions are refused, and this says so.
 func currentHerdrPane() *store.HerdrPane {
 	id := os.Getenv("HERDR_PANE_ID")
 	if id == "" {
 		return nil
 	}
-	return &store.HerdrPane{
+	pane := &store.HerdrPane{
 		PaneID:     id,
 		SocketPath: os.Getenv("HERDR_SOCKET_PATH"),
 		BinPath:    os.Getenv("HERDR_BIN_PATH"),
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), herdrCallTimeout)
+	defer cancel()
+	terminal, err := herdrPaneTerminal(ctx, *pane)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "saint: could not read this pane from herdr (%v); hosts this session asks for will be refused\n", err)
+	}
+	pane.TerminalID = terminal
+	return pane
 }
 
 // startAndAttach creates a session behind the proxy and attaches to it.

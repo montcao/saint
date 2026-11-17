@@ -79,6 +79,10 @@ type HerdrPane struct {
 	PaneID     string `json:"pane_id"`
 	SocketPath string `json:"socket_path,omitempty"`
 	BinPath    string `json:"bin_path,omitempty"`
+	// TerminalID is herdr's ID for the terminal in the pane. A pane ID comes
+	// back after herdr restarts, naming a different pane; the terminal ID does
+	// not, so it is how the proxy knows the pane is still this session's.
+	TerminalID string `json:"terminal_id,omitempty"`
 }
 
 // ProxyAuthOrDefault reports a session's auth mode, defaulting for sessions

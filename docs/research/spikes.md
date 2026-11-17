@@ -169,7 +169,7 @@ of this repository). From inside a session's guest:
 | `CONNECT example.com:443`, prompt answered "Allow always" | 200, TLS completes; the host is saved |
 | the same host after a proxy restart | 200 without asking |
 | an unlisted host, prompt answered "Deny" | 403 |
-| an unlisted host, no answer in 20 s | 403, journalled as no answer |
+| an unlisted host, no answer in 20 s (the timeout then; now 2 minutes) | 403, journalled as no answer |
 | an unlisted host after the session's pane was closed | 403 in about 0.1 s |
 
 On its first start, Claude Code 2.1.247 asked to reach
@@ -256,6 +256,14 @@ passes an environment to that command, so one host wrapper can read
   (`unknown option: saint`), so saint puts the pane first in both commands.
 - `--message` is accepted, but `pane get` and `api snapshot` do not return it,
   so whether herdr shows it was not observed from the CLI.
+
+**A pane ID can come back naming a different pane; its terminal ID cannot.**
+Within one herdr server a closed pane's ID was not reused: after `w1:p2` was
+closed, the next split was `w1:p3`, and `pane get w1:p2` answered
+`pane_not_found`. After the server restarted, a new workspace's first pane was
+`w1:p1` again, with a different `terminal_id` (`pane get` returns it). So a
+recorded pane ID alone can point at somebody else's pane, and saint records the
+terminal ID with it and checks both before asking anything there.
 
 **An overlay plugin pane opens only on the active pane.**
 `herdr plugin pane open --placement overlay --target-pane <pane>` fails with

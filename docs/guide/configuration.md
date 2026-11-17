@@ -185,14 +185,15 @@ left it.
 - **Allow always** lets the request through and saves the host for every
   session, running ones included.
 - **Deny** refuses this request only. It is not remembered.
-- Esc, `q` or closing the prompt deny. So does no answer within 20 seconds:
+- Esc, `q` or closing the prompt deny. So does no answer within 2 minutes:
   the request fails with a 403 rather than hanging.
 
 Keys pressed in the moment after the prompt appears are ignored, so a key
 pressed while clicking into it cannot answer a question you have not read. Once nothing is waiting, the pane goes
 back to herdr's own reading of the agent. A session with no herdr pane, or
 whose pane is gone, is refused at once and the reason is written to
-`~/.saint/proxy.out`.
+`~/.saint/proxy.out`. So is one whose pane ID now names a different pane, as
+happens after herdr restarts; reattaching the session records its pane again.
 
 ```bash
 saint allow                  # saved and shipped hosts

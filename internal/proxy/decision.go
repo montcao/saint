@@ -56,14 +56,16 @@ type Decider interface {
 	Decide(ctx context.Context, sessionID, host string) Decision
 }
 
-// askTimeout bounds how long a guest waits for a person.
+// askTimeout bounds how long a guest waits for a person. The prompt opens
+// beside the session's pane without taking focus, so this is long enough to
+// notice a blocked pane and walk over to it, not just to press a key.
 //
 // A prompt that blocks forever is how an agent running unattended at three in
 // the morning becomes an agent that is simply stuck, with no error, no output
 // and nothing in the log to explain it. Past this the request is refused and
 // the refusal is recorded, so the host can be allowed in the morning and the
 // agent gets a clean network error in the meantime rather than a hang.
-const askTimeout = 20 * time.Second
+const askTimeout = 2 * time.Minute
 
 // policyDecider is the built-in policy: explicit rules first, then the default
 // allowlist, then ask.

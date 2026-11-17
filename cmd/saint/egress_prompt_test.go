@@ -26,6 +26,19 @@ type fakeHerdr struct {
 	prompt  func(conn *controlConn)
 	prompts *egressPrompter
 	t       *testing.T
+	// terminalID is what herdr reports the pane holds; empty means the
+	// pane the test sessions recorded.
+	terminalID string
+}
+
+func (f *fakeHerdr) terminal(_ context.Context, pane store.HerdrPane) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, []string{pane.SocketPath, "pane", "get", pane.PaneID})
+	if f.terminalID != "" {
+		return f.terminalID, nil
+	}
+	return herdrSession.Herdr.TerminalID, nil
 }
 
 func (f *fakeHerdr) run(_ context.Context, pane store.HerdrPane, args ...string) error {
@@ -83,6 +96,7 @@ func testPrompter(t *testing.T, sessions map[string]store.Session) (*egressPromp
 			*saved = append(*saved, host)
 			return nil
 		},
+		terminal: fake.terminal,
 		run:      fake.run,
 		stateDir: "/state",
 		logf:     t.Logf,
@@ -96,7 +110,7 @@ func testPrompter(t *testing.T, sessions map[string]store.Session) (*egressPromp
 
 var herdrSession = store.Session{
 	ID: "s1", Name: "web", Runtime: "codex",
-	Herdr: &store.HerdrPane{PaneID: "w1:p2", SocketPath: "/herdr/one.sock"},
+	Herdr: &store.HerdrPane{PaneID: "w1:p2", SocketPath: "/herdr/one.sock", TerminalID: "term_a"},
 }
 
 // The whole round trip: the pane is marked blocked naming the host, a prompt
@@ -133,6 +147,7 @@ func TestAskingInHerdrAllowsAndSaves(t *testing.T) {
 	fake.waitFor("release", func(c []string) bool { return slices.Contains(c, "release-agent") })
 	calls := fake.commands()
 	want := [][]string{
+		{"/herdr/one.sock", "pane", "get", "w1:p2"},
 		{"/herdr/one.sock", "pane", "report-agent", "w1:p2", "--source", "saint", "--agent", "codex", "--state", "blocked", "--message", "saint: allow network access to paste.example?"},
 		{"/herdr/one.sock", "plugin", "pane", "open", "--plugin", "saint", "--entrypoint", "egress", "--placement", "split", "--direction", "down", "--target-pane", "w1:p2", "--no-focus", "--env", "SAINT_EGRESS_SESSION=s1", "--env", "SAINT_HOME=/state"},
 		{"/herdr/one.sock", "pane", "release-agent", "w1:p2", "--source", "saint", "--agent", "codex"},
@@ -359,5 +374,68 @@ func TestEgressPromptIgnoresKeysJustAfterDrawing(t *testing.T) {
 	}
 	if answer.Allow {
 		t.Error("a key typed as the prompt appeared allowed the host")
+	}
+}
+
+// A pane ID that came back after a herdr restart names somebody else's pane.
+// Nothing is shown there: the request is refused at once, the record cleared.
+// A record with no terminal ID cannot be checked and is treated the same way.
+func TestAPaneHoldingAnotherTerminalIsNotAsked(t *testing.T) {
+	t.Parallel()
+
+	noTerminal := herdrSession
+	noTerminal.Herdr = &store.HerdrPane{PaneID: "w1:p2", SocketPath: "/herdr/one.sock"}
+
+	for name, tc := range map[string]struct {
+		session  store.Session
+		terminal string
+	}{
+		"reused pane ID":       {herdrSession, "term_b"},
+		"no recorded terminal": {noTerminal, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p, fake, _ := testPrompter(t, map[string]store.Session{"s1": tc.session})
+			fake.terminalID = tc.terminal
+			var forgotten []store.HerdrPane
+			var forgetMu sync.Mutex
+			p.forget = func(_ string, pane store.HerdrPane) {
+				forgetMu.Lock()
+				forgotten = append(forgotten, pane)
+				forgetMu.Unlock()
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			start := time.Now()
+			if got := p.Ask(ctx, "s1", "paste.example"); got != proxy.DecisionAsk {
+				t.Fatalf("Ask() = %v, want unanswered", got)
+			}
+			if waited := time.Since(start); waited > 2*time.Second {
+				t.Errorf("waited %s on a pane that is not the session's", waited)
+			}
+			for _, call := range fake.commands() {
+				if slices.Contains(call, "report-agent") || slices.Contains(call, "plugin") {
+					t.Errorf("herdr was asked to show something on the wrong pane: %q", call)
+				}
+			}
+			forgetMu.Lock()
+			defer forgetMu.Unlock()
+			if len(forgotten) != 1 || forgotten[0] != *tc.session.Herdr {
+				t.Errorf("forgotten = %+v, want the stale record cleared", forgotten)
+			}
+		})
+	}
+}
+
+func TestParsePaneTerminal(t *testing.T) {
+	t.Parallel()
+
+	got, err := parsePaneTerminal([]byte(`{"id":"cli:pane:get","result":{"pane":{"pane_id":"w1:p2","terminal_id":"term_66077c4c58da02"},"type":"pane"}}`))
+	if err != nil || got != "term_66077c4c58da02" {
+		t.Errorf("parsePaneTerminal = %q, %v", got, err)
+	}
+	if _, err := parsePaneTerminal([]byte(`{"error":{"code":"pane_not_found"}}`)); err == nil {
+		t.Error("a reply naming no terminal was accepted")
 	}
 }
