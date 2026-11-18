@@ -46,9 +46,12 @@ Every press after that goes straight to the agent.
 - **Start a session:** press your key in a pane inside the project. saint
   mounts that pane's folder, opens a split beside it and starts the agent
   there. Bind a second key to `saint.new-codex` for Codex.
-- **Watch it like any agent:** herdr shows each session as working or idle.
-  **Blocked** from saint means one thing: the session wants a host you have not
-  allowed.
+- **Watch it like any agent:** herdr shows each session as working or idle;
+  saint marks it working whenever the agent is waiting on the model. **Blocked**
+  from saint means one thing: the session wants a host you have not allowed.
+- **Know what it bills:** before the agent starts, the pane says whether the
+  session draws on your Claude plan or bills an API key, and when its
+  credential expires.
 - **Answer network questions:** a small pane opens below the blocked session,
   without taking your focus. Go to it and press `a` to allow the host for every
   session, or `d` to refuse this request. No answer within 2 minutes refuses.

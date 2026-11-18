@@ -437,7 +437,7 @@ func runAttach(ctx context.Context, deps sessionDeps, args []string) error {
 	if len(args) == 0 {
 		return errors.New("usage: saint attach <name|id>")
 	}
-	return reattach(ctx, deps, args[0])
+	return reattach(ctx, deps, args[0], os.Stdout)
 }
 
 type debugLogger struct {
