@@ -160,10 +160,31 @@ func parseTarget(raw, defaultPort string) (target, error) {
 		host, port = strings.Trim(raw, "[]"), defaultPort
 	}
 	host = strings.ToLower(strings.TrimSuffix(host, "."))
-	if host == "" || port == "" {
+	if host == "" || port == "" || !plausibleHost(host) {
 		return target{}, fmt.Errorf("malformed host %q", raw)
 	}
 	return target{host: host, port: port}, nil
+}
+
+// plausibleHost refuses a host no DNS name or IP literal can be: brackets left
+// over from a malformed IPv6 literal, URL punctuation, whitespace, control
+// characters, anything outside ASCII, and empty labels. The policy rules on
+// this string and a person may be shown it in a prompt, so it must be a host
+// and nothing else. FuzzParseTarget found each of these.
+func plausibleHost(host string) bool {
+	// An empty label: "a..b", or a second trailing dot after the one a fully
+	// qualified name may carry.
+	if strings.HasPrefix(host, ".") || strings.HasSuffix(host, ".") || strings.Contains(host, "..") {
+		return false
+	}
+	for _, r := range host {
+		// Names travel as ASCII (an international name as punycode), so
+		// anything else is not a host this proxy should rule on.
+		if r <= 0x20 || r >= 0x7f || strings.ContainsRune("[]/\\@?#", r) {
+			return false
+		}
+	}
+	return true
 }
 
 // isForwardRequest reports whether a request arrived in one of the two shapes a
