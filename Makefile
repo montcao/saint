@@ -5,8 +5,11 @@ PREFIX   ?= $(HOME)/.local
 BINDIR   ?= $(PREFIX)/bin
 # One pinned commitlint for hooks, CI and people, reading commitlint.config.mjs.
 COMMITLINT := npx --yes -p @commitlint/cli@21.2.4 commitlint
-# One pinned govulncheck for CI and people.
-GOVULNCHECK := go run golang.org/x/vuln/cmd/govulncheck@v1.9.0
+# One pinned govulncheck for CI and people. It is built for this machine even
+# when GOOS and GOARCH name another, which is how CI scans the darwin build
+# from a Linux runner.
+GOVULNCHECK_VERSION := v1.9.0
+TOOLBIN := $(or $(TMPDIR),/tmp)/saint-tools
 # How long `make fuzz` spends on each fuzz target.
 FUZZTIME ?= 30s
 
@@ -54,7 +57,8 @@ docs-check:
 # Known vulnerabilities in the code paths saint actually calls, in its
 # dependencies and in the Go standard library it is built with.
 vulncheck:
-	$(GOVULNCHECK) ./...
+	@GOOS= GOARCH= GOBIN=$(TOOLBIN) go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
+	$(TOOLBIN)/govulncheck ./...
 
 # Explore every fuzz target for FUZZTIME each. `make check` already runs their
 # seed inputs; this looks for new ones. A failing input is saved under
