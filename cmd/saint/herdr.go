@@ -197,7 +197,7 @@ func runHerdrPane(ctx context.Context, deps sessionDeps, in io.Reader, out io.Wr
 
 func herdrPane(ctx context.Context, deps sessionDeps, in *bufio.Reader, out io.Writer) error {
 	if ref := os.Getenv(envSession); ref != "" {
-		return reattach(ctx, deps, ref)
+		return reattach(ctx, deps, ref, out)
 	}
 	repo := os.Getenv(envRepo)
 	if repo == "" {
@@ -216,11 +216,12 @@ func herdrPane(ctx context.Context, deps sessionDeps, in *bufio.Reader, out io.W
 
 // reattach starts a stopped session if needed, makes sure its proxy is up,
 // and attaches.
-func reattach(ctx context.Context, deps sessionDeps, ref string) error {
+func reattach(ctx context.Context, deps sessionDeps, ref string, out io.Writer) error {
 	found, err := deps.svc.Find(ref)
 	if err != nil {
 		return err
 	}
+	printBilling(out, found)
 	// Start fails for a session that is already running, which is fine.
 	_ = deps.svc.Start(ctx, found.ID)
 	if err := serveSession(ctx, deps, found.ID); err != nil {
@@ -317,6 +318,7 @@ func startAndAttach(ctx context.Context, deps sessionDeps, in *bufio.Reader, out
 	// network's gateway address exists only while a container is attached
 	// (docs/research/spikes.md). The guest's init waits for the proxy before
 	// starting the agent, so the agent's first request finds a listener.
+	printBilling(out, created)
 	fmt.Fprintln(out, "saint: starting the credential proxy")
 	err = serveSession(ctx, deps, created.ID)
 	if errors.Is(err, errProxyUnreachable) && deps.firstRun.fixFirewall != nil &&

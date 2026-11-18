@@ -87,6 +87,9 @@ func newProxyRuntime(st *store.Store, kc *keychain.Keychain, containerPath strin
 		Logf:         logger.Printf,
 		Forward:      sessionForward(prompter, policy, jr),
 
+		// The pane shows working while the agent waits on the model.
+		OnRequestStart: prompter.Begin,
+
 		OnUsage: func(ev proxy.UsageEvent) {
 			// This runs on the goroutine copying an agent's response. record
 			// queues and returns; it never touches the disk here.
