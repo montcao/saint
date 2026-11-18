@@ -1,0 +1,54 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # A new advisory can affect code nobody changed, so the scan also runs
+  # weekly, and that run fuzzes for longer than a pull request can wait.
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  vulncheck:
+    # Linux runners are cheaper; govulncheck reads the darwin build, which is
+    # the only one saint ships, from GOOS and GOARCH.
+    runs-on: ubuntu-latest
+    env:
+      GOOS: darwin
+      GOARCH: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make vulncheck
+
+  fuzz:
+    # Only on the schedule or by hand: minutes of fuzzing per target would
+    # slow every pull request, and the seed inputs already run in `make check`.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make fuzz FUZZTIME=2m
+      # A failing input is written under testdata/fuzz; keep it so it can be
+      # committed as a regression test.
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-failures
+          path: "**/testdata/fuzz/**"

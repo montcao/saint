@@ -78,6 +78,19 @@ rather than a vulnerability:
   prompts.** Sessions created with permissions skipped are behaving as
   documented.
 
+## How the code is checked
+
+- `govulncheck` runs on every pull request and weekly (`make vulncheck`). It
+  reports known vulnerabilities only where saint's code can reach them.
+- `go.mod` pins a patched Go toolchain, so a build from source, including the
+  one `herdr plugin install` runs, uses it rather than an older local Go.
+- Fuzz tests cover what a guest controls: request targets, the headers that
+  carry a session token, host rules and the loopback guard. Their seed inputs
+  run in `make check`, and the weekly run fuzzes each for two minutes
+  (`make fuzz`).
+- The test suite runs under the race detector, with a stress test that drives
+  many tunnels at once while the saved policy changes.
+
 ## Handling of secrets in this repository
 
 Every credential-shaped string in the tests is a fixture. If you believe you

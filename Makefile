@@ -5,8 +5,12 @@ PREFIX   ?= $(HOME)/.local
 BINDIR   ?= $(PREFIX)/bin
 # One pinned commitlint for hooks, CI and people, reading commitlint.config.mjs.
 COMMITLINT := npx --yes -p @commitlint/cli@21.2.4 commitlint
+# One pinned govulncheck for CI and people.
+GOVULNCHECK := go run golang.org/x/vuln/cmd/govulncheck@v1.9.0
+# How long `make fuzz` spends on each fuzz target.
+FUZZTIME ?= 30s
 
-.PHONY: all build install uninstall run test vet fmt fmt-check check docs-check hooks commitlint-msg commitlint-range allow-firewall clean
+.PHONY: all build install uninstall run test vet fmt fmt-check check docs-check vulncheck fuzz hooks commitlint-msg commitlint-range allow-firewall clean
 
 all: build
 
@@ -46,6 +50,22 @@ check: fmt-check vet test
 # Fail on documents that point at files, targets or documents that do not exist.
 docs-check:
 	go run ./scripts/docs-check
+
+# Known vulnerabilities in the code paths saint actually calls, in its
+# dependencies and in the Go standard library it is built with.
+vulncheck:
+	$(GOVULNCHECK) ./...
+
+# Explore every fuzz target for FUZZTIME each. `make check` already runs their
+# seed inputs; this looks for new ones. A failing input is saved under
+# testdata/fuzz and becomes a regression test once committed.
+fuzz:
+	@set -e; for pkg in $$(go list ./...); do \
+		for target in $$(go test -list '^Fuzz' $$pkg | grep '^Fuzz' || true); do \
+			echo "$$pkg $$target"; \
+			go test $$pkg -run '^$$' -fuzz "^$$target$$" -fuzztime $(FUZZTIME); \
+		done; \
+	done
 
 # Use the hooks in .githooks for this clone only: commit-msg runs commitlint,
 # pre-push runs the fast checks. Undo with `git config --unset core.hooksPath`.

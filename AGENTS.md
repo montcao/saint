@@ -13,6 +13,8 @@ is one line here; the linked document has the full text.
 ```bash
 make check        # gofmt, vet, race tests, structural tests; run it and quote the output
 make docs-check   # documents that point at missing files, targets or documents
+make vulncheck    # known vulnerabilities in code saint calls, its modules and Go itself
+make fuzz         # explore the fuzz targets for FUZZTIME each (seeds already run in make check)
 make hooks        # install .githooks for this clone (commit-msg, pre-push)
 make build        # build ./saint
 ```
