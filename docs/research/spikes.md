@@ -288,3 +288,47 @@ Gotchas:
 
 Not verified: `working` and `blocked` produced by a real authenticated agent
 through the wrapper.
+
+## Direct agent terminal
+
+Read the Apple `container` 1.3.0 source. An attached interactive start
+takes the original terminal descriptors, applies their initial geometry and
+forwards resize events. It rejects attach to an already running microVM. New
+saint sessions use this path, with the agent as the child of the guest init.
+The findings above about guest tmux and losing the attach client describe
+legacy sessions. Live resize, scrollback and closing a direct herdr pane
+remain to be measured on macOS.
+
+## Native agent images
+
+Built both images before and after the change with Docker 29.9.2 on Linux
+x86-64. The workspace intercepts TLS, so the validation builds mounted its
+CA bundle as a temporary build secret for downloads. The checked-in
+Dockerfiles contain no workspace-specific CA settings. The table reports
+Docker's image `Size` in bytes.
+
+| Image | Before (bytes) | After (bytes) |
+|---|---:|---:|
+| Claude | 588,398,577 | 419,666,679 |
+| Codex | 698,492,664 | 492,455,836 |
+
+A non-root login shell found Claude Code 2.1.247, Codex 0.149.1, Git and CA
+certificates. The Codex build also shipped its executable helper and sandbox
+resources. Node and tmux were absent from the images. Apple `container`
+compressed and unpacked size, one idle session's size, and the live
+`saint new` path for each agent remain to be measured on Apple silicon.
+
+## Claude Code custom key approval and plan label
+
+Tested the checksum-verified Linux x86-64 Claude Code 2.1.247 binary in an
+interactive terminal, with an empty config directory and a fixture key. It
+asked whether to use the custom key until its onboarding state included the
+last 20 characters of that key in `customApiKeyResponses.approved`. With that
+state it reached the prompt. The test ended before a provider call.
+
+In the same pinned build, the `CLAUDE_CODE_OAUTH_TOKEN` path reads its plan label
+from `CLAUDE_CODE_SUBSCRIPTION_TYPE`. The renderer falls back to “Claude API”
+when the plan is absent or unrecognized. saint supplies the subscription
+token and leaves plan metadata unspecified. The label therefore cannot
+identify the billed account. The live subscription 429 and host-versus-guest
+request header names remain to be measured.

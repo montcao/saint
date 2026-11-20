@@ -87,6 +87,13 @@ type Config struct {
 	// implementation must be safe for that.
 	OnUsage func(UsageEvent)
 
+	// OnUpstreamError observes non-2xx responses from the provider. Like
+	// OnUsage, it can be called concurrently and must return promptly.
+	OnUpstreamError func(UpstreamErrorEvent)
+	// OnUpstreamStatus observes the status received from the provider as soon
+	// as its headers arrive. Callbacks must be safe for concurrent requests.
+	OnUpstreamStatus func(sessionID, provider string, status int)
+
 	// OnRequestStart is called when an attributed request begins crossing the
 	// proxy and returns a function called exactly once when it finishes.
 	//
@@ -334,23 +341,34 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Error(rw, "upstream request failed", http.StatusBadGateway)
 	}
-	if p.cfg.OnUsage != nil {
-		reverse.ModifyResponse = p.meterResponse(sessionID, provider)
+	if p.cfg.OnUsage != nil || p.cfg.OnUpstreamError != nil || p.cfg.OnUpstreamStatus != nil {
+		reverse.ModifyResponse = p.observeResponse(sessionID, provider)
 	}
 	reverse.ServeHTTP(w, r)
 }
 
-// meterResponse returns a ModifyResponse hook that observes token usage on the
-// way past.
+// observeResponse returns a ModifyResponse hook for usage and upstream errors.
 //
 // It never rewrites headers and never returns an error. Both matter: the
 // reverse proxy decides whether to flush immediately from the response
 // Content-Type, so touching headers could turn a live SSE stream into a
 // buffered one, and a non-nil error here would divert a perfectly good response
 // into ErrorHandler and hand the guest a 502 because accounting failed.
-func (p *Proxy) meterResponse(sessionID, provider string) func(*http.Response) error {
+func (p *Proxy) observeResponse(sessionID, provider string) func(*http.Response) error {
 	return func(resp *http.Response) error {
-		if resp == nil || resp.Body == nil {
+		if resp == nil {
+			return nil
+		}
+		if p.cfg.OnUpstreamStatus != nil {
+			p.emitUpstreamStatus(sessionID, provider, resp.StatusCode)
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			if p.cfg.OnUpstreamError != nil {
+				p.observeUpstreamError(resp, sessionID, provider)
+			}
+			return nil
+		}
+		if p.cfg.OnUsage == nil || resp.Body == nil {
 			return nil
 		}
 

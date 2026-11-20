@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -82,7 +83,8 @@ func (d *Doctor) Run(ctx context.Context) ([]Result, error) {
 
 	statusRaw, err := run(ctx, d.ContainerPath, "system", "status", "--format", "json")
 	status := struct {
-		Status string `json:"status"`
+		Status  string `json:"status"`
+		AppRoot string `json:"appRoot"`
 	}{}
 	_ = json.Unmarshal([]byte(statusRaw), &status)
 	results = append(results, Result{
@@ -91,6 +93,9 @@ func (d *Doctor) Run(ctx context.Context) ([]Result, error) {
 		Detail: strings.TrimSpace(status.Status),
 		Fix:    "container system start --enable-kernel-install",
 	})
+	if err == nil && status.Status == "running" {
+		results = append(results, builderResult(ctx, d.ContainerPath, status.AppRoot))
+	}
 
 	cfg, cfgErr := d.Store.EnsureConfig()
 	results = append(results, Result{
@@ -215,25 +220,13 @@ func Format(results []Result) string {
 	return b.String()
 }
 
-func BuildImages(ctx context.Context, containerPath, repoRoot string) error {
+func BuildImages(ctx context.Context, containerPath, repoRoot string, out io.Writer) error {
 	if repoRoot == "" {
 		return fmt.Errorf("cannot locate the saint checkout containing images/; run saint doctor --build-images from inside it")
 	}
 	for _, runtime := range RuntimeImageNames {
-		context := filepath.Join(repoRoot, "images", runtime)
-		cmd := exec.CommandContext(ctx, containerPath, "build", "-t", "saint/"+runtime+":latest", context)
-		var stdout bytes.Buffer
-		var stderr bytes.Buffer
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-		if err := cmd.Run(); err != nil {
-			// Keep the underlying error: a build that fails without writing to
-			// stderr would otherwise produce an empty, unactionable message.
-			detail := strings.TrimSpace(stderr.String())
-			if detail == "" {
-				return fmt.Errorf("build %s: %w", context, err)
-			}
-			return fmt.Errorf("build %s: %w: %s", context, err, detail)
+		if err := sandbox.BuildRuntimeImage(ctx, containerPath, repoRoot, runtime, out); err != nil {
+			return err
 		}
 	}
 	return nil

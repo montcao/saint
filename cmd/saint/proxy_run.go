@@ -89,6 +89,14 @@ func newProxyRuntime(st *store.Store, kc *keychain.Keychain, containerPath strin
 
 		// The pane shows working while the agent waits on the model.
 		OnRequestStart: prompter.Begin,
+		OnUpstreamError: func(ev proxy.UpstreamErrorEvent) {
+			jr.record(upstreamErrorRecord(ev, time.Now()))
+		},
+		OnUpstreamStatus: func(sessionID, provider string, status int) {
+			if jr.activity.active.Load() {
+				jr.record(journalRecord{Time: time.Now(), Kind: journalKindUpstreamStatus, SessionID: sessionID, Provider: provider, Status: status})
+			}
+		},
 
 		OnUsage: func(ev proxy.UsageEvent) {
 			// This runs on the goroutine copying an agent's response. record
@@ -188,11 +196,35 @@ func listenSession(ctx context.Context, st *store.Store, containerPath string, l
 	if err != nil {
 		return "", err
 	}
-	ready := filepath.Join(st.Paths().SessionsDir, sessionID, sandbox.ProxyReadyFile)
-	if err := os.WriteFile(ready, nil, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("signal the guest: %w", err)
+	// Direct panes signal their guest only after the host confirms that this
+	// listener is reachable. Legacy guests expect the proxy to signal here.
+	if !session.Direct {
+		if err := markProxyReady(st, sessionID, sandbox.ProxyReadyFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
 	}
 	return addr, nil
+}
+
+func markProxyReady(st *store.Store, id, marker string) error {
+	if !store.ValidSessionID(id) {
+		return fmt.Errorf("invalid session ID %q", id)
+	}
+	dir := filepath.Join(st.Paths().SessionsDir, id)
+	// The guest can plant a symlink or FIFO at proxy-ready. Create a new
+	// file and replace the name without ever opening the guest's entry.
+	f, err := os.CreateTemp(dir, ".proxy-ready-*")
+	if err != nil {
+		return fmt.Errorf("signal the guest: %w", err)
+	}
+	defer os.Remove(f.Name())
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("signal the guest: %w", err)
+	}
+	if err := os.Rename(f.Name(), filepath.Join(dir, marker)); err != nil {
+		return fmt.Errorf("signal the guest: %w", err)
+	}
+	return nil
 }
 
 // listenRunningSessions binds the network of every saint session whose
@@ -268,6 +300,7 @@ func runProxy(ctx context.Context, st *store.Store, kc *keychain.Keychain, conta
 		listeners: rt.Listeners.addrs,
 		listen:    rt.ListenSession,
 		egress:    rt.Prompter.servePrompt,
+		activity:  rt.Journal.serveActivity,
 	}, rt.Prompter.logf)
 	fmt.Println("control socket", st.Paths().ControlSocket)
 

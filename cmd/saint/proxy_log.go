@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -179,6 +181,20 @@ func journalSummary(rec journalRecord) (what, result string) {
 			status = fmt.Sprintf("%d", rec.Status)
 		}
 		return what, status + " " + formatJournalDuration(rec.DurationMS)
+
+	case journalKindUpstreamError:
+		var result strings.Builder
+		fmt.Fprint(&result, rec.Status)
+		if rec.ErrorType != "" {
+			fmt.Fprint(&result, " ", journalText(rec.ErrorType))
+		}
+		if rec.RetryAfter != "" {
+			fmt.Fprint(&result, " retry-after=", journalText(rec.RetryAfter))
+		}
+		for _, name := range slices.Sorted(maps.Keys(rec.RateLimits)) {
+			fmt.Fprintf(&result, " %s=%s", journalText(name), journalText(rec.RateLimits[name]))
+		}
+		return "upstream error", result.String()
 
 	case journalKindUsage:
 		shape := "single"

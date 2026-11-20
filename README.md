@@ -80,9 +80,13 @@ description = "sandboxed agent"
 - **Answer network questions:** a small pane opens below the blocked session,
   without taking your focus. Go to it and press `a` to allow the host for every
   session, or `d` to refuse this request. No answer within 2 minutes refuses.
-- **Close and come back:** closing the pane leaves the agent running.
-  `saint attach <session>` in any herdr pane reconnects, and network questions
-  follow it there. `saint ls` lists sessions.
+- **See session activity:** a split shows host decisions, provider status and
+  measured usage as they happen. Close the activity split whenever you like.
+  It opens again the next time you attach in herdr.
+- **Close and come back:** closing a new session's agent pane or quitting the
+  agent stops its microVM. `saint attach <session>` starts the agent again in
+  the same microVM. Older tmux sessions still reconnect to their running
+  agents. `saint ls` lists sessions.
 - **Turn off Claude Code's telemetry:** bind `saint.telemetry` to toggle it;
   herdr shows a notification saying whether it is now on or off.
 
@@ -93,7 +97,7 @@ The first session puts the `saint` command in `~/.saint/bin`; add that to your
 
 ```bash
 saint ls                # sessions and their state
-saint attach <session>  # reconnect to a session
+saint attach <session>  # reopen a session
 saint stop <session>    # stop a session, keep it
 saint rm <session>      # delete a session; your files are untouched
 saint doctor            # check the setup
@@ -117,6 +121,9 @@ saint new <repo>        # start a session without herdr
 - **Not packaged yet.** saint builds from source and is unsigned, so if the
   macOS firewall blocks a session's proxy, the pane offers to let it through,
   and macOS asks for your password in its own dialog.
+- **Runtime images.** `saint doctor --build-images` rebuilds the images for
+  new sessions. Apple `container` shares one builder across projects. After
+  all builds finish, `container builder stop` releases its VM resources.
 
 [`SECURITY.md`](SECURITY.md) lists exactly what saint does and does not
 protect. [`docs/guide/configuration.md`](docs/guide/configuration.md) covers

@@ -35,7 +35,8 @@ When a runtime behaviour surprises you, measure it and add a section.
   through any chain of imports. *Checked.*
 - **The control socket is the only way into a running proxy.** It is 0600 in
   the state directory, outside every mount, so only the user's own processes
-  reach it. Not checked.
+  reach it. The activity split uses an attachment-scoped stream on that socket.
+  The journal writer sends to a bounded queue for each attached session.
 - **Nothing machine-local.** No real home directory in any file, and no
   private-network address in a production string literal; both are discovered
   at runtime. *Checked.*
