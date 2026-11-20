@@ -10,8 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime/debug"
+	"strings"
 
 	"github.com/montcao/saint/internal/store"
 )
@@ -99,59 +99,84 @@ func fileDigest(path string) ([]byte, error) {
 	return h.Sum(nil), nil
 }
 
-const socketFilterFW = "/usr/libexec/ApplicationFirewall/socketfilterfw"
+const (
+	socketFilterFW = "/usr/libexec/ApplicationFirewall/socketfilterfw"
+	osascript      = "/usr/bin/osascript"
+)
 
-// firewallArgs are the two socketfilterfw calls that let path accept
-// connections from containers. Both need an administrator.
-func firewallArgs(path string) [][]string {
-	return [][]string{
-		{"sudo", socketFilterFW, "--add", path},
-		{"sudo", socketFilterFW, "--unblockapp", path},
+// errFirewallCanceled is the password dialog being dismissed: nothing changed.
+var errFirewallCanceled = errors.New("the macOS password dialog was canceled; the firewall was not changed")
+
+// firewallScript is the AppleScript that runs tool --add and tool --unblockapp
+// on the path given as its first argument. The path is never written into
+// the script: it arrives through argv and reaches the shell as AppleScript's
+// `quoted form of`, so no character in it can change the command. With admin
+// set, macOS asks for an administrator's password in its own dialog.
+func firewallScript(tool string, admin bool) []string {
+	run := `do shell script ` + appleScriptString(tool+" --add ") + ` & p & ` +
+		appleScriptString(" && "+tool+" --unblockapp ") + ` & p`
+	if admin {
+		run += " with administrator privileges"
+	}
+	return []string{
+		"on run argv",
+		"set p to quoted form of (item 1 of argv)",
+		run,
+		"end run",
 	}
 }
 
+// appleScriptString quotes a fixed string for AppleScript source. Only the
+// tool's path and fixed flags pass through it, never the binary's path.
+func appleScriptString(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
+}
+
+// firewallArgs is the osascript call that lets path accept connections from
+// containers: socketfilterfw --add, then --unblockapp, both as an
+// administrator, behind one macOS password dialog.
+func firewallArgs(path string) []string {
+	args := []string{osascript}
+	for _, line := range firewallScript(socketFilterFW, true) {
+		args = append(args, "-e", line)
+	}
+	return append(args, path)
+}
+
 // runFirewall allows the proxy's fixed copy through the macOS application
-// firewall, running sudo in the terminal so it can ask for a password.
-func runFirewall(ctx context.Context, st *store.Store, in io.Reader, out io.Writer) error {
+// firewall. The password is asked for in macOS's own dialog rather than in
+// the pane, where the pane's own reads of the terminal would compete for it.
+// run is (*exec.Cmd).Run, or a fake in tests.
+func runFirewall(ctx context.Context, st *store.Store, out io.Writer, run func(*exec.Cmd) error) error {
 	path, err := ensureStableBinary(st)
 	if err != nil {
 		return fmt.Errorf("prepare %s: %w", stableBinaryPath(st), err)
 	}
-	fmt.Fprintf(out, "saint: allowing %s through the macOS firewall (sudo asks for your password)\n", path)
-	for _, args := range firewallArgs(path) {
-		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-		cmd.Stdin = in
-		cmd.Stdout = out
-		cmd.Stderr = out
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("%s: %w", args[1], err)
-		}
+	fmt.Fprintf(out, "saint: allowing %s through the macOS firewall; macOS asks for your password in a dialog\n", path)
+	args := firewallArgs(path)
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	var stderr bytes.Buffer
+	cmd.Stdout = out
+	cmd.Stderr = &stderr
+	if err := run(cmd); err != nil {
+		return firewallError(err, stderr.String())
 	}
+	fmt.Fprintf(out, "saint: the macOS firewall now lists %s as allowed\n", path)
 	return nil
 }
 
-// firewallEnabled reports whether the macOS application firewall is on. It
-// needs no administrator. An answer it cannot read counts as on, so setup
-// offers the fix rather than skipping it.
-func firewallEnabled(ctx context.Context) bool {
-	out, err := exec.CommandContext(ctx, socketFilterFW, "--getglobalstate").Output()
-	if err != nil {
-		return true
+// firewallError says what went wrong from osascript's exit and stderr. A
+// dismissed dialog is error -128, "User canceled".
+func firewallError(err error, stderr string) error {
+	stderr = strings.TrimSpace(stderr)
+	if strings.Contains(stderr, "(-128)") || strings.Contains(stderr, "User canceled") {
+		return errFirewallCanceled
 	}
-	return parseFirewallState(string(out))
-}
-
-// parseFirewallState reads socketfilterfw --getglobalstate, such as
-// "Firewall is disabled. (State = 0)"; 1 is on and 2 blocks everything.
-func parseFirewallState(out string) bool {
-	m := firewallStatePattern.FindStringSubmatch(out)
-	if m == nil {
-		return true
+	if stderr != "" {
+		return fmt.Errorf("socketfilterfw: %s", stderr)
 	}
-	return m[1] != "0"
+	return fmt.Errorf("socketfilterfw: %w", err)
 }
-
-var firewallStatePattern = regexp.MustCompile(`State = (\d+)`)
 
 // buildRevision is the commit this binary was built from, as Go records it
 // when building inside a git checkout; empty otherwise.

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -190,16 +189,17 @@ func runHerdrPane(ctx context.Context, deps sessionDeps, in io.Reader, out io.Wr
 	if deps.svc != nil {
 		_, _ = ensureStableBinary(deps.svc.Store)
 	}
-	reader := bufio.NewReader(in)
-	err := herdrPane(ctx, deps, reader, out)
+	p := newPrompter(in)
+	err := herdrPane(ctx, deps, p, out)
 	if err != nil {
+		p.discardPending()
 		fmt.Fprintf(out, "\nsaint: %v\n\nPress Enter to close this pane.", err)
-		_, _ = reader.ReadString('\n')
+		_, _ = p.ReadString('\n')
 	}
 	return err
 }
 
-func herdrPane(ctx context.Context, deps sessionDeps, in *bufio.Reader, out io.Writer) error {
+func herdrPane(ctx context.Context, deps sessionDeps, in *prompter, out io.Writer) error {
 	if ref := os.Getenv(envSession); ref != "" {
 		return reattach(ctx, deps, ref, out)
 	}
@@ -284,8 +284,8 @@ func currentHerdrPane() *store.HerdrPane {
 }
 
 // startAndAttach creates a session behind the proxy and attaches to it.
-func startAndAttach(ctx context.Context, deps sessionDeps, in *bufio.Reader, out io.Writer, req session.CreateRequest) error {
-	if err := ensureService(ctx, deps, in, out); err != nil {
+func startAndAttach(ctx context.Context, deps sessionDeps, in *prompter, out io.Writer, req session.CreateRequest) error {
+	if _, err := ensureService(ctx, deps, in, out); err != nil {
 		return err
 	}
 
@@ -310,8 +310,8 @@ func startAndAttach(ctx context.Context, deps sessionDeps, in *bufio.Reader, out
 	fmt.Fprintln(out, "saint: starting the credential proxy")
 	err = serveSession(ctx, deps, created.ID)
 	if errors.Is(err, errProxyUnreachable) && deps.firstRun.fixFirewall != nil &&
-		confirm(in, out, "the macOS firewall is blocking saint's proxy. Allow it now? sudo asks for your password, once.") {
-		if ferr := deps.firstRun.fixFirewall(ctx, in, out); ferr != nil {
+		confirm(in, out, "the macOS firewall is blocking saint's proxy. Allow it now? macOS shows a password dialog, once.") {
+		if ferr := deps.firstRun.fixFirewall(ctx, out); ferr != nil {
 			return fmt.Errorf("allow saint through the firewall: %w", ferr)
 		}
 		err = serveSession(ctx, deps, created.ID)
@@ -323,26 +323,25 @@ func startAndAttach(ctx context.Context, deps sessionDeps, in *bufio.Reader, out
 }
 
 // ensureService makes sure Apple's container service answers, offering to
-// start a stopped one.
-func ensureService(ctx context.Context, deps sessionDeps, in *bufio.Reader, out io.Writer) error {
+// start a stopped one. It reports whether it started it.
+func ensureService(ctx context.Context, deps sessionDeps, in *prompter, out io.Writer) (started bool, err error) {
 	// The first call that needs the container service.
-	err := deps.checkService(ctx)
+	err = deps.checkService(ctx)
 	if errors.Is(err, sandbox.ErrServiceStopped) {
 		// Usual after a reboot. Starting it affects every container on this
 		// Mac, not just saint's, so the user says yes first.
-		fmt.Fprint(out, "saint: Apple's container service is not running. Start it now? [Y/n] ")
-		answer, _ := in.ReadString('\n')
-		if a := strings.ToLower(strings.TrimSpace(answer)); a != "" && a != "y" && a != "yes" {
-			return err
+		if !confirm(in, out, "Apple's container service is not running. Start it now?") {
+			return false, declined(err)
 		}
 		fmt.Fprintln(out, "saint: starting the container service")
 		if err := deps.startService(ctx); err != nil {
-			return fmt.Errorf("start container service: %w", err)
+			return false, fmt.Errorf("start container service: %w", err)
 		}
+		started = true
 		err = deps.checkService(ctx)
 	}
 	if err != nil {
-		return fmt.Errorf("container service: %w", err)
+		return false, fmt.Errorf("container service: %w", err)
 	}
-	return nil
+	return started, nil
 }

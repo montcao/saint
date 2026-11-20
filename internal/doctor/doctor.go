@@ -369,7 +369,7 @@ func proxyReachableResult(addr string) Result {
 // to run rather than attempted. The proxy runs from a fixed copy of saint in
 // the state directory, and that copy is what the firewall must allow.
 func firewallFix() string {
-	return "saint firewall (runs sudo socketfilterfw --add and --unblockapp on the proxy's copy of saint in the state directory)"
+	return "saint firewall (runs socketfilterfw --add and --unblockapp as an administrator, through the macOS password dialog, on the proxy's copy of saint in the state directory)"
 }
 
 // localListener reports whether this host has a process listening on addr.

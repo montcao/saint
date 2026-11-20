@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -25,8 +24,10 @@ import (
 // config.toml, the setup pane offers to write the binding for them: it picks a
 // key herdr does not already use, backs config.toml up, has herdr validate the
 // result before it replaces anything, and reloads the config. It also runs the
-// first-run steps a pane would (container service, image, credential,
-// firewall), so the first key press goes straight to the agent.
+// first-run steps a pane would (container service, image, credential), so the
+// first key press goes straight to the agent. The macOS firewall is not asked
+// about here: a session offers that only if the firewall turns out to block
+// its proxy.
 
 const herdrSetupEntrypoint = "setup"
 
@@ -99,6 +100,9 @@ type herdrConfig struct {
 	reload func(ctx context.Context) error
 	// now stamps the backup's name.
 	now func() time.Time
+	// notify shows a herdr notification. Setup's result is sent this way too,
+	// so it is still there after the pane closes.
+	notify func(ctx context.Context, title, body string) error
 }
 
 // liveHerdrConfig is the herdrConfig for the herdr that invoked saint.
@@ -122,6 +126,9 @@ func liveHerdrConfig() herdrConfig {
 			return exec.CommandContext(ctx, herdrBinary(), "server", "reload-config").Run()
 		},
 		now: time.Now,
+		notify: func(ctx context.Context, title, body string) error {
+			return showHerdrNotification(ctx, title, body, io.Discard)
+		},
 	}
 }
 
@@ -138,72 +145,226 @@ func herdrConfigPath() string {
 	return filepath.Join(home, ".config", "herdr", "config.toml")
 }
 
-// runHerdrSetupPane is the setup pane. Like the session pane it waits for
-// Enter before closing, so the last thing it says is read.
+// setupLogName is the setup pane's transcript, in the state directory.
+const setupLogName = "setup.log"
+
+// runHerdrSetupPane is the setup pane. It keeps a transcript of what it
+// prints in setup.log, ends with a summary of every step, and closes only on
+// q, so neither the summary nor the next step is lost to a stray Enter.
 func runHerdrSetupPane(ctx context.Context, deps sessionDeps, hcfg herdrConfig, in io.Reader, out io.Writer) error {
+	logPath := ""
 	if deps.svc != nil {
 		_, _ = ensureStableBinary(deps.svc.Store)
+		logPath = filepath.Join(deps.svc.Store.Paths().Root, setupLogName)
 	}
-	reader := bufio.NewReader(in)
-	err := herdrSetup(ctx, deps, hcfg, reader, out)
-	if err != nil {
-		fmt.Fprintf(out, "\nsaint: %v\n", err)
+	return setupPane(ctx, deps, hcfg, newPrompter(in), out, logPath)
+}
+
+// setupPane runs setup with its output copied to logPath, when set, and waits
+// for q before returning.
+func setupPane(ctx context.Context, deps sessionDeps, hcfg herdrConfig, in *prompter, out io.Writer, logPath string) error {
+	w := out
+	if logPath != "" {
+		f, err := openSetupLog(logPath)
+		if err != nil {
+			fmt.Fprintf(out, "saint: not keeping a transcript (%v)\n", err)
+			logPath = ""
+		} else {
+			defer f.Close()
+			w = io.MultiWriter(out, bestEffort{f})
+		}
 	}
-	fmt.Fprint(out, "\nPress Enter to close this pane.")
-	_, _ = reader.ReadString('\n')
+	err := herdrSetup(ctx, deps, hcfg, in, w, logPath)
+	waitForQuit(in, w)
 	return err
 }
 
-func herdrSetup(ctx context.Context, deps sessionDeps, hcfg herdrConfig, in *bufio.Reader, out io.Writer) error {
-	fmt.Fprintln(out, "saint setup: one question per step; Enter accepts the default.")
+// openSetupLog replaces the last run's transcript. Only this user can read
+// it: it names the files and keys saint changed.
+func openSetupLog(path string) (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	// OpenFile keeps the mode of a file that already exists.
+	if err := f.Chmod(0o600); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return f, nil
+}
+
+// bestEffort is a writer whose failures are ignored, so a full disk stops the
+// transcript but never the pane's output or the build streaming through it.
+type bestEffort struct{ w io.Writer }
+
+func (b bestEffort) Write(p []byte) (int, error) {
+	_, _ = b.w.Write(p)
+	return len(p), nil
+}
+
+// waitForQuit keeps the pane open until q and Enter, or until input closes.
+// The terminal is line-buffered, so q alone is not seen until Enter.
+func waitForQuit(in *prompter, out io.Writer) {
+	in.discardPending()
+	for {
+		fmt.Fprint(out, "\nType q and press Enter to close this pane. ")
+		line, err := in.ReadString('\n')
+		if strings.EqualFold(strings.TrimSpace(line), "q") || err != nil {
+			return
+		}
+	}
+}
+
+func herdrSetup(ctx context.Context, deps sessionDeps, hcfg herdrConfig, in *prompter, out io.Writer, logPath string) error {
+	fmt.Fprintln(out, "saint setup: one question per step; Enter accepts the default. Keys pressed before a question appears are ignored.")
+	var report setupReport
 	// Keys are offered even when an earlier step is declined or fails: the
 	// first pane asks for whatever setup did not finish.
-	prepErr := setupAgent(ctx, deps, in, out)
+	prepErr := setupAgent(ctx, deps, in, out, &report)
 	if prepErr != nil {
 		fmt.Fprintf(out, "saint: %v\n", prepErr)
 	}
-	bound, err := bindKeys(ctx, hcfg, saintBindings, in, out)
-	if err != nil {
-		return err
+	bound, keysErr := bindKeys(ctx, hcfg, saintBindings, in, out, &report)
+	if keysErr != nil {
+		fmt.Fprintf(out, "saint: %v\n", keysErr)
+		report.add("keys", stepFailed, keysErr.Error())
 	}
-	fmt.Fprintln(out)
+	err := errors.Join(prepErr, keysErr)
+
 	key, ok := bound[saintBindings[0].Action]
 	key = describeKey(key, herdrPrefix(ctx, hcfg))
-	switch {
-	case prepErr != nil && ok:
-		fmt.Fprintf(out, "saint: not finished. Press %s in a pane inside your project and it asks for what is missing.\n", key)
-	case prepErr != nil:
-		fmt.Fprintln(out, "saint: not finished. Run setup again, or start a session with: herdr plugin action invoke new --plugin saint")
-	case ok:
-		fmt.Fprintf(out, "saint: set up. Press %s in a pane inside your project to start a sandboxed Claude session.\n", key)
-	default:
-		fmt.Fprintln(out, "saint: set up. Start a session with: herdr plugin action invoke new --plugin saint")
+	title, next := setupOutcome(err == nil, ok, key)
+
+	fmt.Fprintln(out)
+	report.print(out)
+	fmt.Fprintf(out, "%s. %s\n", title, next)
+	if logPath != "" {
+		fmt.Fprintf(out, "saint: this transcript is in %s\n", logPath)
 	}
-	return prepErr
+	if hcfg.notify != nil {
+		// The pane may be closed before anyone reads it; a notification
+		// that cannot be shown changes nothing about setup.
+		_ = hcfg.notify(ctx, title, next)
+	}
+	return err
+}
+
+// setupOutcome is setup's one-line result and the next thing to do.
+func setupOutcome(finished, bound bool, key string) (title, next string) {
+	switch {
+	case !finished && bound:
+		return "saint: not finished", fmt.Sprintf("Press %s in a pane inside your project and it asks for what is missing.", key)
+	case !finished:
+		return "saint: not finished", "Run setup again, or start a session with: herdr plugin action invoke new --plugin saint"
+	case bound:
+		return "saint: set up", fmt.Sprintf("Press %s in a pane inside your project to start a sandboxed Claude session.", key)
+	default:
+		return "saint: set up", "Start a session with: herdr plugin action invoke new --plugin saint"
+	}
+}
+
+// stepState is what one setup step came to.
+type stepState int
+
+const (
+	stepDone stepState = iota
+	stepAlready
+	stepSkipped
+	stepFailed
+	stepNotReached
+)
+
+func (s stepState) String() string {
+	switch s {
+	case stepDone:
+		return "done"
+	case stepAlready:
+		return "already done"
+	case stepSkipped:
+		return "skipped"
+	case stepFailed:
+		return "failed"
+	default:
+		return "not reached"
+	}
+}
+
+type setupStep struct {
+	name   string
+	state  stepState
+	detail string
+}
+
+// setupReport collects what each step did, for the summary at the end.
+type setupReport struct{ steps []setupStep }
+
+func (r *setupReport) add(name string, state stepState, detail string) {
+	if r != nil {
+		r.steps = append(r.steps, setupStep{name, state, detail})
+	}
+}
+
+// addResult records a step from its error: declined is skipped, any other
+// error failed, and otherwise done when it did something, already done when
+// there was nothing to do.
+func (r *setupReport) addResult(name string, did bool, err error) {
+	switch {
+	case errors.Is(err, errDeclined):
+		r.add(name, stepSkipped, err.Error())
+	case err != nil:
+		r.add(name, stepFailed, err.Error())
+	case did:
+		r.add(name, stepDone, "")
+	default:
+		r.add(name, stepAlready, "")
+	}
+}
+
+func (r *setupReport) print(out io.Writer) {
+	fmt.Fprintln(out, "saint setup summary:")
+	for _, s := range r.steps {
+		if s.detail != "" {
+			fmt.Fprintf(out, "  %s: %s: %s\n", s.name, s.state, s.detail)
+		} else {
+			fmt.Fprintf(out, "  %s: %s\n", s.name, s.state)
+		}
+	}
 }
 
 // setupAgent runs what the first Claude pane would otherwise ask: the
-// container service, the image, a credential, and the firewall if it is on.
-func setupAgent(ctx context.Context, deps sessionDeps, in *bufio.Reader, out io.Writer) error {
-	if err := ensureService(ctx, deps, in, out); err != nil {
-		return err
+// container service, the image and a credential. Each step needs the one
+// before it, so the first that does not finish ends the run.
+func setupAgent(ctx context.Context, deps sessionDeps, in *prompter, out io.Writer, r *setupReport) error {
+	rt := sandbox.RuntimeClaude
+	steps := []struct {
+		name string
+		run  func() (bool, error)
+	}{
+		{"container service", func() (bool, error) { return ensureService(ctx, deps, in, out) }},
+		{fmt.Sprintf("%s image", rt), func() (bool, error) { return deps.firstRun.ensureImage(ctx, rt, in, out) }},
+		{"credential", func() (bool, error) { return deps.firstRun.ensureCredential(ctx, rt, in, out) }},
 	}
-	if err := deps.firstRun.prepare(ctx, sandbox.RuntimeClaude, in, out); err != nil {
-		return err
-	}
-	f := deps.firstRun
-	if f.firewallOn != nil && f.fixFirewall != nil && f.firewallOn(ctx) &&
-		confirm(in, out, "the macOS firewall is on. Let saint's proxy through it now? sudo asks for your password, once.") {
-		if err := f.fixFirewall(ctx, in, out); err != nil {
-			return fmt.Errorf("allow saint through the firewall: %w", err)
+	for i, step := range steps {
+		did, err := step.run()
+		r.addResult(step.name, did, err)
+		if err != nil {
+			for _, later := range steps[i+1:] {
+				r.add(later.name, stepNotReached, "needs the "+step.name)
+			}
+			return err
 		}
 	}
 	return nil
 }
 
 // bindKeys offers each binding not already in config.toml and writes the ones
-// accepted in one change. It returns every saint action's key, old and new.
-func bindKeys(ctx context.Context, hcfg herdrConfig, wanted []keyBinding, in *bufio.Reader, out io.Writer) (map[string]string, error) {
+// accepted in one change. It returns every saint action's key, old and new,
+// and records what happened to each binding in r, which may be nil.
+func bindKeys(ctx context.Context, hcfg herdrConfig, wanted []keyBinding, in *prompter, out io.Writer, r *setupReport) (map[string]string, error) {
 	if hcfg.path == "" {
 		return nil, errors.New("cannot tell where herdr's config.toml is; set HERDR_CONFIG_PATH")
 	}
@@ -220,6 +381,7 @@ func bindKeys(ctx context.Context, hcfg herdrConfig, wanted []keyBinding, in *bu
 		if key, ok := user.actions[b.Action]; ok {
 			bound[b.Action] = key
 			fmt.Fprintf(out, "saint: %s is already bound to %s\n", b.Action, key)
+			r.add(bindingStep(b), stepAlready, key)
 			continue
 		}
 		todo = append(todo, b)
@@ -234,11 +396,13 @@ func bindKeys(ctx context.Context, hcfg herdrConfig, wanted []keyBinding, in *bu
 		if err := hcfg.check(ctx, hcfg.path); err != nil {
 			fmt.Fprintf(out, "saint: herdr reports problems in %s, so saint will not edit it:\n%s\n", hcfg.path, err)
 			printManualBindings(out, todo)
+			failBindings(r, todo, "herdr reports problems in "+hcfg.path+"; add it by hand as shown above")
 			return bound, nil
 		}
 	}
 	if hcfg.defaults == nil {
 		printManualBindings(out, todo)
+		failBindings(r, todo, "herdr's default keys are unknown; add it by hand as shown above")
 		return bound, nil
 	}
 	defaults, err := hcfg.defaults(ctx)
@@ -246,6 +410,7 @@ func bindKeys(ctx context.Context, hcfg herdrConfig, wanted []keyBinding, in *bu
 		// Without herdr's defaults a chosen key could silently replace one.
 		fmt.Fprintf(out, "saint: could not read herdr's default keys (%v)\n", err)
 		printManualBindings(out, todo)
+		failBindings(r, todo, "could not read herdr's default keys; add it by hand as shown above")
 		return bound, nil
 	}
 	defaultKeys := parseHerdrKeys(defaults, true)
@@ -256,6 +421,7 @@ func bindKeys(ctx context.Context, hcfg herdrConfig, wanted []keyBinding, in *bu
 	for _, b := range todo {
 		key, ok := chooseKey(b, taken, prefix, in, out)
 		if !ok {
+			r.add(bindingStep(b), stepSkipped, "")
 			continue
 		}
 		taken[key] = b.Action
@@ -269,6 +435,9 @@ func bindKeys(ctx context.Context, hcfg herdrConfig, wanted []keyBinding, in *bu
 	if err != nil {
 		fmt.Fprintf(out, "saint: did not change %s: %v\n", hcfg.path, err)
 		printManualBindings(out, todo)
+		for _, c := range chosen {
+			r.add(bindingStep(c.keyBinding), stepFailed, fmt.Sprintf("did not change %s: %v", hcfg.path, err))
+		}
 		return bound, nil
 	}
 	if backup != "" {
@@ -278,6 +447,7 @@ func bindKeys(ctx context.Context, hcfg herdrConfig, wanted []keyBinding, in *bu
 	}
 	for _, c := range chosen {
 		bound[c.Action] = c.Key
+		r.add(bindingStep(c.keyBinding), stepDone, describeKey(c.Key, prefix))
 	}
 	if hcfg.reload != nil {
 		if err := hcfg.reload(ctx); err != nil {
@@ -287,6 +457,18 @@ func bindKeys(ctx context.Context, hcfg herdrConfig, wanted []keyBinding, in *bu
 		}
 	}
 	return bound, nil
+}
+
+// bindingStep names a binding in setup's summary.
+func bindingStep(b keyBinding) string {
+	return "key to " + b.What
+}
+
+// failBindings records every binding as not written, for one reason.
+func failBindings(r *setupReport, todo []keyBinding, reason string) {
+	for _, b := range todo {
+		r.add(bindingStep(b), stepFailed, reason)
+	}
 }
 
 // prefixKey is herdr's prefix key: config.toml's, or herdr's default. Empty
@@ -346,7 +528,7 @@ type chosenBinding struct {
 
 // chooseKey asks whether to bind the first free candidate, taking yes, no or
 // a different key. It returns false when the person declines.
-func chooseKey(b keyBinding, taken map[string]string, prefix string, in *bufio.Reader, out io.Writer) (string, bool) {
+func chooseKey(b keyBinding, taken map[string]string, prefix string, in *prompter, out io.Writer) (string, bool) {
 	key := ""
 	for _, c := range b.Candidates {
 		if _, used := taken[normalizeKey(c)]; !used {
@@ -355,6 +537,7 @@ func chooseKey(b keyBinding, taken map[string]string, prefix string, in *bufio.R
 		}
 	}
 	for attempt := 0; attempt < 3; attempt++ {
+		in.discardPending()
 		if key == "" {
 			fmt.Fprintf(out, "saint: which key should %s? Type a key such as prefix+alt+s, or Enter to skip: ", b.What)
 		} else {

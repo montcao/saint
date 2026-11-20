@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -34,39 +33,76 @@ type firstRun struct {
 	// credentialReady reports whether a credential for the runtime resolves.
 	credentialReady func(ctx context.Context, rt sandbox.Runtime) bool
 	// addCredential asks for one and saves it.
-	addCredential func(ctx context.Context, rt sandbox.Runtime, in *bufio.Reader, out io.Writer) error
-	// fixFirewall lets the proxy through the macOS firewall.
-	fixFirewall func(ctx context.Context, in io.Reader, out io.Writer) error
-	// firewallOn reports whether the macOS application firewall is on, for
-	// setup to offer fixFirewall before any proxy has failed to be reached.
-	firewallOn func(ctx context.Context) bool
+	addCredential func(ctx context.Context, rt sandbox.Runtime, in *prompter, out io.Writer) error
+	// fixFirewall lets the proxy through the macOS firewall, once a session's
+	// proxy has turned out to be unreachable. macOS asks for the password in
+	// its own dialog, so it reads nothing from the pane.
+	fixFirewall func(ctx context.Context, out io.Writer) error
 }
 
-// confirm asks a yes/no question that defaults to yes.
-func confirm(in *bufio.Reader, out io.Writer, question string) bool {
+// errDeclined marks a step the person said no to, so setup can report it as
+// skipped rather than failed. Its message is the wrapped error's alone.
+var errDeclined = errors.New("declined")
+
+type declinedError struct{ err error }
+
+func (e declinedError) Error() string        { return e.err.Error() }
+func (e declinedError) Unwrap() error        { return e.err }
+func (e declinedError) Is(target error) bool { return target == errDeclined }
+
+func declined(err error) error { return declinedError{err} }
+
+// confirm asks a yes/no question that defaults to yes. Input typed before the
+// question is discarded first, so an Enter pressed during a long step does
+// not answer it.
+func confirm(in *prompter, out io.Writer, question string) bool {
+	in.discardPending()
 	fmt.Fprintf(out, "saint: %s [Y/n] ", question)
-	answer, _ := in.ReadString('\n')
+	answer, err := in.ReadString('\n')
 	a := strings.ToLower(strings.TrimSpace(answer))
+	if a == "" && err != nil {
+		// No answer at all (input closed) is not consent.
+		return false
+	}
 	return a == "" || a == "y" || a == "yes"
 }
 
 // prepare runs the image and credential steps for a new session.
-func (f firstRun) prepare(ctx context.Context, rt sandbox.Runtime, in *bufio.Reader, out io.Writer) error {
-	if f.imagePresent != nil && f.buildImage != nil && !f.imagePresent(ctx, rt) {
-		if !confirm(in, out, fmt.Sprintf("the %s agent image is not built yet. Build it now? It takes a few minutes, once.", rt)) {
-			return fmt.Errorf("no %s image; build it with: saint doctor --build-images", rt)
-		}
-		if err := f.buildImage(ctx, rt, out); err != nil {
-			return fmt.Errorf("build the %s image: %w", rt, err)
-		}
-		fmt.Fprintf(out, "saint: the %s image is built\n", rt)
+func (f firstRun) prepare(ctx context.Context, rt sandbox.Runtime, in *prompter, out io.Writer) error {
+	if _, err := f.ensureImage(ctx, rt, in, out); err != nil {
+		return err
 	}
-	if f.credentialReady != nil && f.addCredential != nil && !f.credentialReady(ctx, rt) {
-		if err := f.addCredential(ctx, rt, in, out); err != nil {
-			return err
-		}
+	_, err := f.ensureCredential(ctx, rt, in, out)
+	return err
+}
+
+// ensureImage builds the runtime's image if it is missing and the person
+// agrees. It reports whether there was anything to do.
+func (f firstRun) ensureImage(ctx context.Context, rt sandbox.Runtime, in *prompter, out io.Writer) (built bool, err error) {
+	if f.imagePresent == nil || f.buildImage == nil || f.imagePresent(ctx, rt) {
+		return false, nil
 	}
-	return nil
+	if !confirm(in, out, fmt.Sprintf("the %s agent image is not built yet. Build it now? It takes a few minutes, once.", rt)) {
+		return false, declined(fmt.Errorf("no %s image; build it with: saint doctor --build-images", rt))
+	}
+	fmt.Fprintf(out, "saint: building the %s image. This takes a few minutes; nothing needs pressing until saint asks again.\n", rt)
+	if err := f.buildImage(ctx, rt, out); err != nil {
+		return false, fmt.Errorf("build the %s image: %w", rt, err)
+	}
+	fmt.Fprintf(out, "saint: the %s image is built\n", rt)
+	return true, nil
+}
+
+// ensureCredential asks for a credential if none resolves for the runtime. It
+// reports whether there was anything to do.
+func (f firstRun) ensureCredential(ctx context.Context, rt sandbox.Runtime, in *prompter, out io.Writer) (added bool, err error) {
+	if f.credentialReady == nil || f.addCredential == nil || f.credentialReady(ctx, rt) {
+		return false, nil
+	}
+	if err := f.addCredential(ctx, rt, in, out); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // runtimeImageExists asks the container CLI whether a runtime's image exists.
@@ -134,8 +170,8 @@ func credentialResolves(st *store.Store, kc *keychain.Keychain) func(context.Con
 
 // askForCredential offers the runtime's credentials and saves the one chosen
 // in the keychain, once per install.
-func askForCredential(st *store.Store, kc *keychain.Keychain) func(context.Context, sandbox.Runtime, *bufio.Reader, io.Writer) error {
-	return func(ctx context.Context, rt sandbox.Runtime, in *bufio.Reader, out io.Writer) error {
+func askForCredential(st *store.Store, kc *keychain.Keychain) func(context.Context, sandbox.Runtime, *prompter, io.Writer) error {
+	return func(ctx context.Context, rt sandbox.Runtime, in *prompter, out io.Writer) error {
 		choices := credentialChoices(rt)
 		if len(choices) == 0 {
 			return fmt.Errorf("no credential for %s; add one with: saint auth", rt)
@@ -152,8 +188,10 @@ func askForCredential(st *store.Store, kc *keychain.Keychain) func(context.Conte
 	}
 }
 
-// chooseCredential asks which credential to add. One choice is not a question.
-func chooseCredential(choices []credentialKind, in *bufio.Reader, out io.Writer) (credentialKind, error) {
+// chooseCredential asks which credential to add. One choice is not a question,
+// but the secret is asked for next, so pending input is discarded either way.
+func chooseCredential(choices []credentialKind, in *prompter, out io.Writer) (credentialKind, error) {
+	in.discardPending()
 	if len(choices) == 1 {
 		fmt.Fprintf(out, "saint: no credential yet. Add one now; it is asked once per install.\n")
 		return choices[0], nil
@@ -166,7 +204,7 @@ func chooseCredential(choices []credentialKind, in *bufio.Reader, out io.Writer)
 	answer, _ := in.ReadString('\n')
 	n, err := strconv.Atoi(strings.TrimSpace(answer))
 	if err != nil || n < 1 || n > len(choices) {
-		return credentialKind{}, fmt.Errorf("no credential chosen; add one with: saint auth")
+		return credentialKind{}, declined(errors.New("no credential chosen; add one with: saint auth"))
 	}
 	return choices[n-1], nil
 }

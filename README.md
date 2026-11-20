@@ -30,13 +30,16 @@ herdr plugin install montcao/saint
 herdr plugin action invoke setup --plugin saint
 ```
 
-A pane opens and asks one question per step; Enter takes the default. It
-starts Apple's container service if it is stopped, builds the Claude image (a
-few minutes, once), adds a credential (your Claude plan token or an API key),
-lets saint through the macOS firewall if it is on (your password, once), and
-binds two keys, one for a Claude pane and one for Codex. If you already use
-those keys, it offers the next free ones. saint backs up herdr's `config.toml`
-and has herdr check the new one before replacing it.
+A pane opens and asks one question per step; Enter takes the default, and
+keys pressed before a question appears are ignored. It starts Apple's
+container service if it is stopped, builds the Claude image (a few minutes,
+once; nothing needs pressing meanwhile), adds a credential (your Claude plan
+token or an API key), and binds two keys, one for a Claude pane and one for
+Codex. If you already use those keys, it offers the next free ones. saint
+backs up herdr's `config.toml` and has herdr check the new one before
+replacing it. It ends with what each step did and the key to press next, also
+sent as a herdr notification, and keeps a copy of its output in
+`~/.saint/setup.log`. Type `q` and Enter to close the pane.
 
 **3. Press the key** in any pane inside your project. herdr keys start with
 its *prefix*, `Ctrl+b` unless you changed it: press it, let go, then press the
@@ -111,8 +114,9 @@ saint new <repo>        # start a session without herdr
   no way out but saint's proxy. Provider APIs, GitHub and the main package
   registries work out of the box; any other host is asked about in herdr, as
   above. `saint allow` lists and edits what you have allowed.
-- **Not packaged yet.** saint builds from source and is unsigned, which is why
-  the firewall step exists.
+- **Not packaged yet.** saint builds from source and is unsigned, so if the
+  macOS firewall blocks a session's proxy, the pane offers to let it through,
+  and macOS asks for your password in its own dialog.
 
 [`SECURITY.md`](SECURITY.md) lists exactly what saint does and does not
 protect. [`docs/guide/configuration.md`](docs/guide/configuration.md) covers

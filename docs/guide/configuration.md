@@ -13,8 +13,9 @@ from, so the panes and the proxy they start all see it. Paths below that say
 
 ## Known limits
 
-- No signed releases, so the first session asks to let saint through the macOS
-  firewall (`saint firewall`, with your password). The proxy runs from a fixed
+- No signed releases, so a session whose proxy the macOS firewall blocks asks
+  to let saint through it (`saint firewall`; macOS asks for your password in
+  its own dialog). The proxy runs from a fixed
   copy at `~/.saint/bin/saint` so the exception is not tied to herdr's install
   folder; whether it survives that copy being replaced by an update is not yet
   measured.
