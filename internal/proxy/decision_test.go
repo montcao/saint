@@ -130,7 +130,9 @@ func TestWithNobodyToAskAnUnknownHostIsDenied(t *testing.T) {
 }
 
 // The default allowlist must not contain a wildcard over a domain a third party
-// can create names under. `github.com` is a site; `*.github.io` is anybody's.
+// can create names under, or a host that serves any account's files.
+// `github.com` is a site; `*.github.io` and raw.githubusercontent.com serve
+// anybody's content.
 // The one wildcard is Claude Code's telemetry domain, whose subdomains are all
 // Datadog's, and which a person can refuse as a whole.
 func TestTheDefaultAllowlistHasNoThirdPartyWildcards(t *testing.T) {
@@ -140,9 +142,9 @@ func TestTheDefaultAllowlistHasNoThirdPartyWildcards(t *testing.T) {
 		if len(host) > 0 && host[0] == '*' && !slices.Contains(claudeTelemetryHosts, host) {
 			t.Errorf("default allowlist entry %q is a wildcard", host)
 		}
-		for _, risky := range []string{".github.io", ".pages.dev", ".vercel.app", ".herokuapp.com"} {
+		for _, risky := range []string{".github.io", ".githubusercontent.com", ".pages.dev", ".vercel.app", ".herokuapp.com"} {
 			if len(host) >= len(risky) && host[len(host)-len(risky):] == risky {
-				t.Errorf("default allowlist entry %q is on a domain anybody can take a name under", host)
+				t.Errorf("default allowlist entry %q serves content anybody can publish", host)
 			}
 		}
 	}

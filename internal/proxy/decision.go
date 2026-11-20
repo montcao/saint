@@ -172,13 +172,16 @@ var defaultAllowedHosts = []string{
 	"api.anthropic.com",
 	"api.openai.com",
 
-	// Source. codeload and objects are where the archives and LFS blobs come
-	// from, and a clone fails without them in a way that looks like a network
-	// fault rather than a policy.
+	// Source. codeload is where archives come from, and a clone fails without
+	// it in a way that looks like a network fault rather than a policy.
+	//
+	// raw.githubusercontent.com and objects.githubusercontent.com are not
+	// here: they serve any account's files (raw scripts, release assets, LFS
+	// blobs) to anyone, which makes them a common way to fetch a payload. The
+	// policy sees only hostnames, so it cannot allow the files a session needs
+	// and refuse the rest; the first request asks instead.
 	"github.com",
 	"codeload.github.com",
-	"objects.githubusercontent.com",
-	"raw.githubusercontent.com",
 
 	// Package registries, one per ecosystem the shipped images can build.
 	"registry.npmjs.org",

@@ -179,7 +179,7 @@ Every host a session asks for is decided in this order:
 |---|---|
 | on `proxy_deny_hosts` | refused, never asked |
 | on `proxy_allow_hosts` (your saved hosts) | allowed |
-| shipped with saint: the provider APIs, GitHub, npm, PyPI, the Go proxy, crates.io, and Claude Code's updater and logging intake | allowed |
+| shipped with saint: the provider APIs, GitHub (`github.com` and `codeload.github.com`, not its user-content hosts), npm, PyPI, the Go proxy, crates.io, and Claude Code's updater and logging intake | allowed |
 | anything else | asked in the session's herdr pane |
 
 When a host is asked about, the session's pane is marked **blocked** with the
