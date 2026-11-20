@@ -168,6 +168,7 @@ func herdrSetup(ctx context.Context, deps sessionDeps, hcfg herdrConfig, in *buf
 	}
 	fmt.Fprintln(out)
 	key, ok := bound[saintBindings[0].Action]
+	key = describeKey(key, herdrPrefix(ctx, hcfg))
 	switch {
 	case prepErr != nil && ok:
 		fmt.Fprintf(out, "saint: not finished. Press %s in a pane inside your project and it asks for what is missing.\n", key)
@@ -247,11 +248,13 @@ func bindKeys(ctx context.Context, hcfg herdrConfig, wanted []keyBinding, in *bu
 		printManualBindings(out, todo)
 		return bound, nil
 	}
-	taken := takenKeys(parseHerdrKeys(defaults, true), user)
+	defaultKeys := parseHerdrKeys(defaults, true)
+	taken := takenKeys(defaultKeys, user)
+	prefix := prefixKey(defaultKeys, user)
 
 	var chosen []chosenBinding
 	for _, b := range todo {
-		key, ok := chooseKey(b, taken, in, out)
+		key, ok := chooseKey(b, taken, prefix, in, out)
 		if !ok {
 			continue
 		}
@@ -278,12 +281,62 @@ func bindKeys(ctx context.Context, hcfg herdrConfig, wanted []keyBinding, in *bu
 	}
 	if hcfg.reload != nil {
 		if err := hcfg.reload(ctx); err != nil {
-			fmt.Fprintf(out, "saint: herdr did not reload its config (%v); press prefix+shift+r to reload it\n", err)
+			fmt.Fprintf(out, "saint: herdr did not reload its config (%v); press %s to reload it\n", err, describeKey("prefix+shift+r", prefix))
 		} else {
-			fmt.Fprintln(out, "saint: herdr reloaded its config. If a key does nothing, press prefix+shift+r to reload it in this window.")
+			fmt.Fprintf(out, "saint: herdr reloaded its config. If a key does nothing, press %s to reload it in this window.\n", describeKey("prefix+shift+r", prefix))
 		}
 	}
 	return bound, nil
+}
+
+// prefixKey is herdr's prefix key: config.toml's, or herdr's default. Empty
+// when neither says, so nothing invents one.
+func prefixKey(defaults, user herdrKeys) string {
+	if p := user.named["prefix"]; p != "" {
+		return p
+	}
+	return defaults.named["prefix"]
+}
+
+// herdrPrefix reads the prefix key the way bindKeys does, for messages after
+// it has returned.
+func herdrPrefix(ctx context.Context, hcfg herdrConfig) string {
+	var user herdrKeys
+	if b, err := os.ReadFile(hcfg.path); err == nil {
+		user = parseHerdrKeys(string(b), false)
+	}
+	var defaults herdrKeys
+	if hcfg.defaults != nil {
+		if d, err := hcfg.defaults(ctx); err == nil {
+			defaults = parseHerdrKeys(d, true)
+		}
+	}
+	return prefixKey(defaults, user)
+}
+
+// describeKey says how to press a key, for someone who has not read herdr's
+// key syntax: "prefix+shift+a" with prefix ctrl+b is "Ctrl+b, then Shift+a".
+func describeKey(key, prefix string) string {
+	rest, hasPrefix := strings.CutPrefix(strings.TrimSpace(key), "prefix+")
+	if !hasPrefix {
+		return keyChord(rest)
+	}
+	if prefix == "" {
+		return "the herdr prefix key, then " + keyChord(rest)
+	}
+	return keyChord(prefix) + ", then " + keyChord(rest)
+}
+
+// keyChord capitalizes a chord's modifiers and named keys, leaving a single
+// character as typed: "ctrl+alt+s" is "Ctrl+Alt+s".
+func keyChord(chord string) string {
+	parts := strings.Split(chord, "+")
+	for i, p := range parts {
+		if len(p) > 1 {
+			parts[i] = strings.ToUpper(p[:1]) + p[1:]
+		}
+	}
+	return strings.Join(parts, "+")
 }
 
 type chosenBinding struct {
@@ -293,7 +346,7 @@ type chosenBinding struct {
 
 // chooseKey asks whether to bind the first free candidate, taking yes, no or
 // a different key. It returns false when the person declines.
-func chooseKey(b keyBinding, taken map[string]string, in *bufio.Reader, out io.Writer) (string, bool) {
+func chooseKey(b keyBinding, taken map[string]string, prefix string, in *bufio.Reader, out io.Writer) (string, bool) {
 	key := ""
 	for _, c := range b.Candidates {
 		if _, used := taken[normalizeKey(c)]; !used {
@@ -305,7 +358,7 @@ func chooseKey(b keyBinding, taken map[string]string, in *bufio.Reader, out io.W
 		if key == "" {
 			fmt.Fprintf(out, "saint: which key should %s? Type a key such as prefix+alt+s, or Enter to skip: ", b.What)
 		} else {
-			fmt.Fprintf(out, "saint: bind %s to %s? [Y/n, or type another key] ", key, b.What)
+			fmt.Fprintf(out, "saint: bind %s (%s in config.toml) to %s? [Y/n, or type another key] ", describeKey(key, prefix), key, b.What)
 		}
 		answer, err := in.ReadString('\n')
 		a := strings.TrimSpace(answer)
@@ -414,7 +467,7 @@ func bindingBlock(key, action, what string) string {
 // printManualBindings says what to add by hand when saint will not edit the
 // file itself.
 func printManualBindings(out io.Writer, todo []keyBinding) {
-	fmt.Fprintln(out, "saint: to bind keys yourself, add this to herdr's config.toml and press prefix+shift+r:")
+	fmt.Fprintln(out, "saint: to bind keys yourself, add this to herdr's config.toml, then press your herdr prefix key and Shift+r to reload:")
 	for _, b := range todo {
 		key := "prefix+alt+a"
 		if len(b.Candidates) > 0 {

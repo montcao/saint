@@ -117,7 +117,7 @@ func TestChooseKey(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var out bytes.Buffer
-			key, ok := chooseKey(b, taken, answers(tc.answers...), &out)
+			key, ok := chooseKey(b, taken, "ctrl+b", answers(tc.answers...), &out)
 			if key != tc.key || ok != tc.ok {
 				t.Fatalf("got (%q, %v), want (%q, %v); output:\n%s", key, ok, tc.key, tc.ok, out.String())
 			}
@@ -128,7 +128,7 @@ func TestChooseKey(t *testing.T) {
 func TestChooseKeyClosedInputIsNotConsent(t *testing.T) {
 	var out bytes.Buffer
 	b := keyBinding{Action: "saint.new", What: "open a pane", Candidates: []string{"prefix+a"}}
-	if key, ok := chooseKey(b, map[string]string{}, bufio.NewReader(strings.NewReader("")), &out); ok {
+	if key, ok := chooseKey(b, map[string]string{}, "ctrl+b", bufio.NewReader(strings.NewReader("")), &out); ok {
 		t.Fatalf("bound %q with no answer", key)
 	}
 }
@@ -137,10 +137,10 @@ func TestChooseKeyAsksWhenEveryCandidateIsTaken(t *testing.T) {
 	var out bytes.Buffer
 	b := keyBinding{Action: "saint.new", What: "open a pane", Candidates: []string{"prefix+a"}}
 	taken := map[string]string{"prefix+a": "something"}
-	if _, ok := chooseKey(b, taken, answers(""), &out); ok {
+	if _, ok := chooseKey(b, taken, "ctrl+b", answers(""), &out); ok {
 		t.Fatal("Enter with nothing free skips")
 	}
-	if key, ok := chooseKey(b, taken, answers("prefix+alt+z"), &out); !ok || key != "prefix+alt+z" {
+	if key, ok := chooseKey(b, taken, "ctrl+b", answers("prefix+alt+z"), &out); !ok || key != "prefix+alt+z" {
 		t.Fatalf("got (%q, %v)", key, ok)
 	}
 }
@@ -411,7 +411,7 @@ func TestHerdrSetupBindsKeysWhenAStepIsDeclined(t *testing.T) {
 	if parseHerdrKeys(string(got), false).actions["saint.new"] != "prefix+a" {
 		t.Fatalf("keys not bound after a declined step:\n%s\n%s", got, out.String())
 	}
-	if !strings.Contains(out.String(), "not finished. Press prefix+a") {
+	if !strings.Contains(out.String(), "not finished. Press Ctrl+b, then a") {
 		t.Fatalf("output:\n%s", out.String())
 	}
 }
@@ -437,7 +437,34 @@ func TestHerdrSetupOffersTheFirewallWhenItIsOn(t *testing.T) {
 	if err := herdrSetup(context.Background(), deps, f.config(path), answers("", "", ""), &out); err != nil {
 		t.Fatal(err)
 	}
-	if !fixed || !strings.Contains(out.String(), "set up. Press prefix+a") {
+	if !fixed || !strings.Contains(out.String(), "set up. Press Ctrl+b, then a") {
 		t.Fatalf("fixed = %v; output:\n%s", fixed, out.String())
+	}
+}
+
+func TestDescribeKey(t *testing.T) {
+	cases := []struct{ key, prefix, want string }{
+		{"prefix+a", "ctrl+b", "Ctrl+b, then a"},
+		{"prefix+shift+a", "ctrl+b", "Ctrl+b, then Shift+a"},
+		{"prefix+alt+a", "f12", "F12, then Alt+a"},
+		{"ctrl+alt+s", "ctrl+b", "Ctrl+Alt+s"},
+		{"prefix+a", "", "the herdr prefix key, then a"},
+		{"prefix+tab", "ctrl+space", "Ctrl+Space, then Tab"},
+	}
+	for _, tc := range cases {
+		if got := describeKey(tc.key, tc.prefix); got != tc.want {
+			t.Errorf("describeKey(%q, %q) = %q, want %q", tc.key, tc.prefix, got, tc.want)
+		}
+	}
+}
+
+// A prefix set in config.toml wins over herdr's default.
+func TestPrefixKey(t *testing.T) {
+	defaults := parseHerdrKeys(defaultsSample, true)
+	if got := prefixKey(defaults, parseHerdrKeys("", false)); got != "ctrl+b" {
+		t.Fatalf("default prefix = %q", got)
+	}
+	if got := prefixKey(defaults, parseHerdrKeys("[keys]\nprefix = \"ctrl+space\"\n", false)); got != "ctrl+space" {
+		t.Fatalf("user prefix = %q", got)
 	}
 }
