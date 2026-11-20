@@ -37,6 +37,9 @@ type firstRun struct {
 	addCredential func(ctx context.Context, rt sandbox.Runtime, in *bufio.Reader, out io.Writer) error
 	// fixFirewall lets the proxy through the macOS firewall.
 	fixFirewall func(ctx context.Context, in io.Reader, out io.Writer) error
+	// firewallOn reports whether the macOS application firewall is on, for
+	// setup to offer fixFirewall before any proxy has failed to be reached.
+	firewallOn func(ctx context.Context) bool
 }
 
 // confirm asks a yes/no question that defaults to yes.

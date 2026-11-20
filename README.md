@@ -24,28 +24,50 @@ You need a Mac with Apple silicon on macOS 26 or newer, Apple's
 herdr plugin install montcao/saint
 ```
 
-**2. Bind a key** in `~/.config/herdr/config.toml`:
+**2. Run setup** in any herdr pane:
+
+```bash
+herdr plugin action invoke setup --plugin saint
+```
+
+A pane opens and asks one question per step; Enter takes the default. It
+starts Apple's container service if it is stopped, builds the Claude image (a
+few minutes, once), adds a credential (your Claude plan token or an API key),
+lets saint through the macOS firewall if it is on (your password, once), and
+binds two keys, one for a Claude pane and one for Codex. If you already use
+those keys, it offers the next free ones. saint backs up herdr's `config.toml`
+and has herdr check the new one before replacing it.
+
+**3. Press the key** in any pane inside your project. herdr keys start with
+its *prefix*, `Ctrl+b` unless you changed it: press it, let go, then press the
+second key.
+
+| To open | Press | Written in `config.toml` as |
+|---|---|---|
+| A Claude pane | `Ctrl+b`, then `a` | `prefix+a` |
+| A Codex pane | `Ctrl+b`, then `Shift+a` | `prefix+shift+a` |
+
+Setup prints the keys it actually bound, and `Ctrl+b`, then `?` lists every
+key herdr knows. The agent starts and asks you to accept bypass-permissions
+mode. Anything setup skipped, such as the Codex image, is asked for the first
+time a pane needs it.
+
+To bind keys yourself instead, add this to `~/.config/herdr/config.toml`, then
+press `Ctrl+b`, then `Shift+r` to reload it:
 
 ```toml
 [[keys.command]]
-key = "prefix+s"
+key = "prefix+a"
 type = "plugin_action"
 command = "saint.new"          # saint.new-codex for Codex
 description = "sandboxed agent"
 ```
 
-**3. Press the key** in any pane inside your project. The first time, the pane
-sets saint up as it goes, one question each: start Apple's container service,
-build the agent image (a few minutes, once), add a credential (your Claude plan
-token or an API key), and let saint through the macOS firewall (your password,
-once). Then the agent starts, and asks you to accept bypass-permissions mode.
-Every press after that goes straight to the agent.
-
 ## Using saint in herdr
 
-- **Start a session:** press your key in a pane inside the project. saint
-  mounts that pane's folder, opens a split beside it and starts the agent
-  there. Bind a second key to `saint.new-codex` for Codex.
+- **Start a session:** press `Ctrl+b`, then `a` (or the key setup printed) in
+  a pane inside the project. saint mounts that pane's folder, opens a split
+  beside it and starts the agent there. `Ctrl+b`, then `Shift+a` does the same for Codex.
 - **Watch it like any agent:** herdr shows each session as working or idle;
   saint marks it working whenever the agent is waiting on the model. **Blocked**
   from saint means one thing: the session wants a host you have not allowed.

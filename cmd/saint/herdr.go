@@ -113,7 +113,7 @@ func herdrBinary() string {
 
 func runHerdr(ctx context.Context, deps sessionDeps, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: saint herdr open [claude|codex] | saint herdr pane | saint herdr egress | saint herdr telemetry")
+		return errors.New("usage: saint herdr open [claude|codex] | saint herdr pane | saint herdr egress | saint herdr telemetry | saint herdr setup")
 	}
 	switch args[0] {
 	case "open":
@@ -124,6 +124,10 @@ func runHerdr(ctx context.Context, deps sessionDeps, args []string) error {
 		return runHerdrEgress(deps.svc.Store.Paths().ControlSocket, os.Stdin, os.Stdout)
 	case "telemetry":
 		return runHerdrTelemetry(ctx, deps.svc.Store)
+	case "setup":
+		return runHerdrSetupOpen(ctx)
+	case "setup-pane":
+		return runHerdrSetupPane(ctx, deps, liveHerdrConfig(), os.Stdin, os.Stdout)
 	default:
 		return fmt.Errorf("unknown herdr command %q", args[0])
 	}
@@ -281,24 +285,8 @@ func currentHerdrPane() *store.HerdrPane {
 
 // startAndAttach creates a session behind the proxy and attaches to it.
 func startAndAttach(ctx context.Context, deps sessionDeps, in *bufio.Reader, out io.Writer, req session.CreateRequest) error {
-	// The first call that needs the container service.
-	err := deps.checkService(ctx)
-	if errors.Is(err, sandbox.ErrServiceStopped) {
-		// Usual after a reboot. Starting it affects every container on this
-		// Mac, not just saint's, so the user says yes first.
-		fmt.Fprint(out, "saint: Apple's container service is not running. Start it now? [Y/n] ")
-		answer, _ := in.ReadString('\n')
-		if a := strings.ToLower(strings.TrimSpace(answer)); a != "" && a != "y" && a != "yes" {
-			return err
-		}
-		fmt.Fprintln(out, "saint: starting the container service")
-		if err := deps.startService(ctx); err != nil {
-			return fmt.Errorf("start container service: %w", err)
-		}
-		err = deps.checkService(ctx)
-	}
-	if err != nil {
-		return fmt.Errorf("container service: %w", err)
+	if err := ensureService(ctx, deps, in, out); err != nil {
+		return err
 	}
 
 	rt := req.Runtime
@@ -332,4 +320,29 @@ func startAndAttach(ctx context.Context, deps sessionDeps, in *bufio.Reader, out
 		return fmt.Errorf("%w (session %s has no network access; reopen it after fixing this)", err, created.Name)
 	}
 	return attachHere(deps, created.ID)
+}
+
+// ensureService makes sure Apple's container service answers, offering to
+// start a stopped one.
+func ensureService(ctx context.Context, deps sessionDeps, in *bufio.Reader, out io.Writer) error {
+	// The first call that needs the container service.
+	err := deps.checkService(ctx)
+	if errors.Is(err, sandbox.ErrServiceStopped) {
+		// Usual after a reboot. Starting it affects every container on this
+		// Mac, not just saint's, so the user says yes first.
+		fmt.Fprint(out, "saint: Apple's container service is not running. Start it now? [Y/n] ")
+		answer, _ := in.ReadString('\n')
+		if a := strings.ToLower(strings.TrimSpace(answer)); a != "" && a != "y" && a != "yes" {
+			return err
+		}
+		fmt.Fprintln(out, "saint: starting the container service")
+		if err := deps.startService(ctx); err != nil {
+			return fmt.Errorf("start container service: %w", err)
+		}
+		err = deps.checkService(ctx)
+	}
+	if err != nil {
+		return fmt.Errorf("container service: %w", err)
+	}
+	return nil
 }

@@ -10,6 +10,14 @@ description = "Open panes whose agent runs in an Apple container microVM, with c
 [[build]]
 command = ["sh", "scripts/plugin-build"]
 
+# The one command a new install runs: herdr plugin action invoke setup
+# --plugin saint. It opens the setup pane below, which offers to bind keys.
+[[actions]]
+id = "setup"
+title = "saint: set up (keys, image, credential, firewall)"
+contexts = ["workspace"]
+command = ["./saint", "herdr", "setup"]
+
 [[actions]]
 id = "new"
 title = "saint: new sandboxed Claude pane"
@@ -37,6 +45,14 @@ id = "session"
 title = "saint"
 placement = "split"
 command = ["./saint", "herdr", "pane"]
+
+# Opened by the setup action. It asks one question per step and offers to
+# add saint's keys to herdr's config.toml, which herdr checks first.
+[[panes]]
+id = "setup"
+title = "saint: setup"
+placement = "split"
+command = ["./saint", "herdr", "setup-pane"]
 
 # Opened by the proxy as a split beside a session's pane, without focus, with
 # SAINT_EGRESS_SESSION set, when that session asks to reach a host nobody has
