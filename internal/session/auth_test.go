@@ -380,3 +380,58 @@ func TestRenewCredentialLeavesTheSessionAloneWhenItCannotResolve(t *testing.T) {
 		t.Error("a working container was removed for a renewal that could not proceed")
 	}
 }
+
+// A fresh install whose only credential is the host's Claude Code login: the
+// plan-token slot is empty, so the login is used, as saint auth reports. The
+// session must not fall back to key mode with no key to inject.
+func TestResolveAuthFallsBackToTheClaudeCodeLogin(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.August, 27, 10, 0, 0, 0, time.UTC)
+	var asked []string
+	svc := &Service{Now: func() time.Time { return now }}
+	svc.Credentials = func(spec string) (credential.Source, error) {
+		asked = append(asked, spec)
+		if spec == credential.ClaudeCodeSpec {
+			return inspectableStub{stubSource{value: "login-oauth", status: credential.Status{Present: true, ExpiresAt: now.Add(5 * time.Hour)}}}, nil
+		}
+		return inspectableStub{stubSource{status: credential.Status{Present: false}}}, nil
+	}
+
+	got := svc.resolveAuth(context.Background(), store.Config{ProxyAuth: store.ProxyAuthAuto}, sandbox.RuntimeClaude, "")
+	if got.Mode != sandbox.AuthSubscription || got.Token != "login-oauth" || got.Source != credential.ClaudeCodeSpec {
+		t.Fatalf("got %+v; want the Claude Code login in subscription mode", got)
+	}
+	if len(asked) != 2 || asked[0] != "" || asked[1] != credential.ClaudeCodeSpec {
+		t.Fatalf("asked %q; want the plan-token slot first, then the login", asked)
+	}
+}
+
+// An explicit choice or default is honoured as given: the login is not tried
+// behind the person's back.
+func TestResolveAuthDoesNotSubstituteForAnExplicitChoice(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		cfg    store.Config
+		chosen string
+	}{
+		{"chosen", store.Config{ProxyAuth: store.ProxyAuthAuto}, "keychain:claude-subscription"},
+		{"default", store.Config{ProxyAuth: store.ProxyAuthAuto, DefaultCredential: "keychain:claude-subscription"}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var asked []string
+			svc := &Service{Now: time.Now}
+			svc.Credentials = func(spec string) (credential.Source, error) {
+				asked = append(asked, spec)
+				return inspectableStub{stubSource{status: credential.Status{Present: false}}}, nil
+			}
+			got := svc.resolveAuth(context.Background(), tc.cfg, sandbox.RuntimeClaude, tc.chosen)
+			if got.Mode != sandbox.AuthKey || len(asked) != 1 {
+				t.Fatalf("got %+v after asking %q; want key mode after one attempt", got, asked)
+			}
+		})
+	}
+}
