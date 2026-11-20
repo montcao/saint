@@ -208,6 +208,14 @@ func (a *AppleContainer) Remove(ctx context.Context, name string) error {
 	return err
 }
 
+const (
+	// guestTerm is the terminal type an attach declares inside the guest.
+	guestTerm = "xterm-256color"
+	// guestLocale is glibc's built-in UTF-8 locale, present without any
+	// locales package.
+	guestLocale = "C.UTF-8"
+)
+
 func (a *AppleContainer) AttachCmd(name string, opts AttachOptions) (*exec.Cmd, error) {
 	if err := ValidateContainerName(name); err != nil {
 		return nil, fmt.Errorf("attach: %w", err)
@@ -226,7 +234,18 @@ func (a *AppleContainer) AttachCmd(name string, opts AttachOptions) (*exec.Cmd, 
 	// server while the container keeps running. saint went on reporting the
 	// session as running, and every attach after that failed with "no sessions"
 	// with no way back.
-	args := []string{"exec", "-it", name, "tmux", "new-session", "-A", "-D", "-s", "agent"}
+	//
+	// `container exec` passes neither the terminal type nor a locale into the
+	// guest: there TERM is `xterm` and LANG is empty. tmux then treats the
+	// client as an 8-colour terminal without UTF-8 and draws every box-drawing
+	// character, spinner and wide glyph of the agent's interface wrongly, so
+	// lines overlap (measured with tmux 3.3a: client_utf8=0). The values are
+	// fixed rather than copied from the host because the guest must have the
+	// terminfo entry: xterm-256color is in every image and is what a herdr pane
+	// reports. -u makes tmux trust UTF-8 even if the locale is ever missing.
+	args := []string{"exec", "-it",
+		"-e", "TERM=" + guestTerm, "-e", "LANG=" + guestLocale,
+		name, "tmux", "-u", "new-session", "-A", "-D", "-s", "agent"}
 	if opts.Workdir != "" {
 		args = append(args, "-c", opts.Workdir)
 	}
@@ -291,7 +310,9 @@ func runtimeBootstrapScript(rt Runtime, workdir string, opts CreateOptions) (str
 	// and is already gone - which looks exactly like saint failing to create
 	// one. The lines below decide individually whether their own failure is
 	// worth a session. Almost none of them are.
-	lines := []string{"set -u"}
+	// The tmux server and the agent inherit this script's environment, which
+	// has no locale at all: give them the same UTF-8 one the attach uses.
+	lines := []string{"set -u", "export LANG=" + guestLocale}
 	lines = append(lines, onboardingLines(rt, workdir)...)
 	if opts.Network != "" {
 		lines = append(lines,
