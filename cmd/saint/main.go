@@ -139,6 +139,7 @@ func run(ctx context.Context, args []string) error {
 			fixFirewall: func(ctx context.Context, in io.Reader, out io.Writer) error {
 				return runFirewall(ctx, st, in, out)
 			},
+			firewallOn: firewallEnabled,
 		},
 	}
 

@@ -24,28 +24,40 @@ You need a Mac with Apple silicon on macOS 26 or newer, Apple's
 herdr plugin install montcao/saint
 ```
 
-**2. Bind a key** in `~/.config/herdr/config.toml`:
+**2. Run setup** in any herdr pane:
+
+```bash
+herdr plugin action invoke setup --plugin saint
+```
+
+A pane opens and asks one question per step; Enter takes the default. It
+starts Apple's container service if it is stopped, builds the Claude image (a
+few minutes, once), adds a credential (your Claude plan token or an API key),
+lets saint through the macOS firewall if it is on (your password, once), and
+binds keys: `prefix+a` for a Claude pane and `prefix+shift+a` for Codex, or the
+next free key if you already use those. saint backs up herdr's `config.toml`
+and has herdr check the new one before replacing it.
+
+**3. Press the key** in any pane inside your project. The agent starts and asks
+you to accept bypass-permissions mode. Anything setup skipped, such as the
+Codex image, is asked for the first time a pane needs it.
+
+To bind keys yourself instead, add this to `~/.config/herdr/config.toml` and
+press `prefix+shift+r` to reload:
 
 ```toml
 [[keys.command]]
-key = "prefix+s"
+key = "prefix+a"
 type = "plugin_action"
 command = "saint.new"          # saint.new-codex for Codex
 description = "sandboxed agent"
 ```
 
-**3. Press the key** in any pane inside your project. The first time, the pane
-sets saint up as it goes, one question each: start Apple's container service,
-build the agent image (a few minutes, once), add a credential (your Claude plan
-token or an API key), and let saint through the macOS firewall (your password,
-once). Then the agent starts, and asks you to accept bypass-permissions mode.
-Every press after that goes straight to the agent.
-
 ## Using saint in herdr
 
 - **Start a session:** press your key in a pane inside the project. saint
   mounts that pane's folder, opens a split beside it and starts the agent
-  there. Bind a second key to `saint.new-codex` for Codex.
+  there. Your Codex key does the same for Codex.
 - **Watch it like any agent:** herdr shows each session as working or idle;
   saint marks it working whenever the agent is waiting on the model. **Blocked**
   from saint means one thing: the session wants a host you have not allowed.

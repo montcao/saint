@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime/debug"
 
 	"github.com/montcao/saint/internal/store"
@@ -128,6 +129,29 @@ func runFirewall(ctx context.Context, st *store.Store, in io.Reader, out io.Writ
 	}
 	return nil
 }
+
+// firewallEnabled reports whether the macOS application firewall is on. It
+// needs no administrator. An answer it cannot read counts as on, so setup
+// offers the fix rather than skipping it.
+func firewallEnabled(ctx context.Context) bool {
+	out, err := exec.CommandContext(ctx, socketFilterFW, "--getglobalstate").Output()
+	if err != nil {
+		return true
+	}
+	return parseFirewallState(string(out))
+}
+
+// parseFirewallState reads socketfilterfw --getglobalstate, such as
+// "Firewall is disabled. (State = 0)"; 1 is on and 2 blocks everything.
+func parseFirewallState(out string) bool {
+	m := firewallStatePattern.FindStringSubmatch(out)
+	if m == nil {
+		return true
+	}
+	return m[1] != "0"
+}
+
+var firewallStatePattern = regexp.MustCompile(`State = (\d+)`)
 
 // buildRevision is the commit this binary was built from, as Go records it
 // when building inside a git checkout; empty otherwise.
