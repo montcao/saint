@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -136,10 +135,9 @@ func run(ctx context.Context, args []string) error {
 			buildImage:      buildRuntimeImage(containerPath),
 			credentialReady: credentialResolves(st, kc),
 			addCredential:   askForCredential(st, kc),
-			fixFirewall: func(ctx context.Context, in io.Reader, out io.Writer) error {
-				return runFirewall(ctx, st, in, out)
+			fixFirewall: func(ctx context.Context, out io.Writer) error {
+				return runFirewall(ctx, st, out, (*exec.Cmd).Run)
 			},
-			firewallOn: firewallEnabled,
 		},
 	}
 
@@ -177,7 +175,7 @@ func run(ctx context.Context, args []string) error {
 	case "telemetry":
 		return runTelemetry(st, args[1:], os.Stdout)
 	case "firewall":
-		return runFirewall(ctx, st, os.Stdin, os.Stdout)
+		return runFirewall(ctx, st, os.Stdout, (*exec.Cmd).Run)
 	case "version":
 		return runVersion(os.Stdout)
 	default:
@@ -214,7 +212,7 @@ Usage:
   saint allow -rm <host>     remove a saved host
   saint telemetry [on|off]   allow or refuse Claude Code's own background traffic
   saint doctor               check the host, runtime, credentials and proxy
-  saint firewall             let the proxy through the macOS firewall (sudo)
+  saint firewall             let the proxy through the macOS firewall (password dialog)
   saint version              the commit this binary was built from
   saint herdr open|pane|egress|telemetry   herdr plugin entrypoints
 `
@@ -412,7 +410,7 @@ func runNew(ctx context.Context, deps sessionDeps, args []string) error {
 		repos = append(repos, sandbox.Repo{Path: path})
 	}
 
-	return startAndAttach(ctx, deps, bufio.NewReader(os.Stdin), os.Stdout, session.CreateRequest{
+	return startAndAttach(ctx, deps, newPrompter(os.Stdin), os.Stdout, session.CreateRequest{
 		Name:            *nameFlag,
 		Repos:           repos,
 		Runtime:         runtime,

@@ -86,10 +86,16 @@ func runHerdrTelemetry(ctx context.Context, st *store.Store) error {
 		return err
 	}
 	title, body := telemetryNotification(cfg.ClaudeTelemetryOff)
+	return showHerdrNotification(ctx, title, body, os.Stderr)
+}
+
+// showHerdrNotification shows a herdr notification, for a result that must
+// outlive the action or pane that produced it.
+func showHerdrNotification(ctx context.Context, title, body string, stderr io.Writer) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, herdrBinary(), "notification", "show", title, "--body", body)
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = stderr
 	return cmd.Run()
 }
 

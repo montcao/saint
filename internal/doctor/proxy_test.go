@@ -48,7 +48,7 @@ func TestFirewallFixNamesSocketfilterfw(t *testing.T) {
 	t.Parallel()
 
 	fix := firewallFix()
-	for _, want := range []string{"saint firewall", "socketfilterfw", "--add", "--unblockapp", "sudo"} {
+	for _, want := range []string{"saint firewall", "socketfilterfw", "--add", "--unblockapp", "administrator"} {
 		if !strings.Contains(fix, want) {
 			t.Fatalf("firewallFix() = %q, missing %q", fix, want)
 		}

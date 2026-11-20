@@ -128,7 +128,7 @@ func TestChooseKey(t *testing.T) {
 func TestChooseKeyClosedInputIsNotConsent(t *testing.T) {
 	var out bytes.Buffer
 	b := keyBinding{Action: "saint.new", What: "open a pane", Candidates: []string{"prefix+a"}}
-	if key, ok := chooseKey(b, map[string]string{}, "ctrl+b", bufio.NewReader(strings.NewReader("")), &out); ok {
+	if key, ok := chooseKey(b, map[string]string{}, "ctrl+b", &prompter{Reader: bufio.NewReader(strings.NewReader(""))}, &out); ok {
 		t.Fatalf("bound %q with no answer", key)
 	}
 }
@@ -151,6 +151,9 @@ type fakeHerdrConfig struct {
 	checked  []string
 	reloaded int
 	reject   func(path string) error
+	// notified is each notification shown, as "title|body".
+	notified  []string
+	notifyErr error
 }
 
 func (f *fakeHerdrConfig) config(path string) herdrConfig {
@@ -166,6 +169,10 @@ func (f *fakeHerdrConfig) config(path string) herdrConfig {
 		},
 		reload: func(context.Context) error { f.reloaded++; return nil },
 		now:    func() time.Time { return time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC) },
+		notify: func(_ context.Context, title, body string) error {
+			f.notified = append(f.notified, title+"|"+body)
+			return f.notifyErr
+		},
 	}
 }
 
@@ -182,7 +189,7 @@ func TestBindKeysAppendsBacksUpAndReloads(t *testing.T) {
 	}
 	f := &fakeHerdrConfig{}
 	var out bytes.Buffer
-	bound, err := bindKeys(context.Background(), f.config(path), testBindings, answers("", "n"), &out)
+	bound, err := bindKeys(context.Background(), f.config(path), testBindings, answers("", "n"), &out, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +234,7 @@ func TestBindKeysAppendsBacksUpAndReloads(t *testing.T) {
 	// Run again: both actions are known, nothing is asked and nothing written.
 	out.Reset()
 	f2 := &fakeHerdrConfig{}
-	bound, err = bindKeys(context.Background(), f2.config(path), testBindings[:1], answers(), &out)
+	bound, err = bindKeys(context.Background(), f2.config(path), testBindings[:1], answers(), &out, nil)
 	if err != nil || bound["saint.new"] != "prefix+a" {
 		t.Fatalf("bound = %v, %v", bound, err)
 	}
@@ -240,7 +247,7 @@ func TestBindKeysCreatesAMissingConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "herdr", "config.toml")
 	f := &fakeHerdrConfig{}
 	var out bytes.Buffer
-	if _, err := bindKeys(context.Background(), f.config(path), testBindings[:1], answers(""), &out); err != nil {
+	if _, err := bindKeys(context.Background(), f.config(path), testBindings[:1], answers(""), &out, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(path)
@@ -263,7 +270,7 @@ func TestBindKeysLeavesABrokenConfigAlone(t *testing.T) {
 	}
 	f := &fakeHerdrConfig{reject: func(string) error { return errors.New("config parse error") }}
 	var out bytes.Buffer
-	if _, err := bindKeys(context.Background(), f.config(path), testBindings[:1], answers(""), &out); err != nil {
+	if _, err := bindKeys(context.Background(), f.config(path), testBindings[:1], answers(""), &out, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := os.ReadFile(path); string(got) != original {
@@ -289,7 +296,7 @@ func TestBindKeysKeepsTheOldFileWhenHerdrRejectsTheNewOne(t *testing.T) {
 		return errors.New("prefix+a: kept keys.command[1].key, disabled keys.command[2].key")
 	}
 	var out bytes.Buffer
-	if _, err := bindKeys(context.Background(), f.config(path), testBindings[:1], answers(""), &out); err != nil {
+	if _, err := bindKeys(context.Background(), f.config(path), testBindings[:1], answers(""), &out, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := os.ReadFile(path); string(got) != original {
@@ -312,7 +319,7 @@ func TestBindKeysNeedsHerdrsDefaults(t *testing.T) {
 	hcfg := f.config(path)
 	hcfg.defaults = func(context.Context) (string, error) { return "", errors.New("exit status 2") }
 	var out bytes.Buffer
-	if _, err := bindKeys(context.Background(), hcfg, testBindings[:1], answers(""), &out); err != nil {
+	if _, err := bindKeys(context.Background(), hcfg, testBindings[:1], answers(""), &out, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
@@ -328,20 +335,6 @@ func TestBindingBlockQuotes(t *testing.T) {
 	}
 	if !strings.Contains(block, `description = "saint: say \"hi\""`) {
 		t.Fatalf("description not quoted:\n%s", block)
-	}
-}
-
-func TestParseFirewallState(t *testing.T) {
-	cases := map[string]bool{
-		"Firewall is disabled. (State = 0)\n":                 false,
-		"Firewall is enabled. (State = 1)\n":                  true,
-		"Firewall is blocking all non-essential. (State = 2)": true,
-		"something else entirely":                             true,
-	}
-	for in, want := range cases {
-		if got := parseFirewallState(in); got != want {
-			t.Errorf("parseFirewallState(%q) = %v, want %v", in, got, want)
-		}
 	}
 }
 
@@ -398,12 +391,10 @@ func TestHerdrSetupBindsKeysWhenAStepIsDeclined(t *testing.T) {
 				built = true
 				return nil
 			},
-			firewallOn:  func(context.Context) bool { return false },
-			fixFirewall: func(context.Context, io.Reader, io.Writer) error { t.Fatal("firewall is off"); return nil },
 		},
 	}
 	var out bytes.Buffer
-	err := herdrSetup(context.Background(), deps, f.config(path), answers("n", "", "n"), &out)
+	err := herdrSetup(context.Background(), deps, f.config(path), answers("n", "", "n"), &out, "")
 	if err == nil || built {
 		t.Fatalf("err = %v, built = %v; declining the build is not set up", err, built)
 	}
@@ -416,29 +407,31 @@ func TestHerdrSetupBindsKeysWhenAStepIsDeclined(t *testing.T) {
 	}
 }
 
-// With everything in place, setup asks only about keys and the firewall.
-func TestHerdrSetupOffersTheFirewallWhenItIsOn(t *testing.T) {
+// Setup asks nothing about the macOS firewall: a session offers that only
+// when the firewall turns out to block its proxy.
+func TestHerdrSetupDoesNotAskAboutTheFirewall(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	f := &fakeHerdrConfig{}
-	fixed := false
 	deps := sessionDeps{
 		checkService: func(context.Context) error { return nil },
 		firstRun: firstRun{
 			imagePresent:    func(context.Context, sandbox.Runtime) bool { return true },
 			credentialReady: func(context.Context, sandbox.Runtime) bool { return true },
-			firewallOn:      func(context.Context) bool { return true },
-			fixFirewall: func(context.Context, io.Reader, io.Writer) error {
-				fixed = true
+			fixFirewall: func(context.Context, io.Writer) error {
+				t.Error("setup ran the firewall step")
 				return nil
 			},
 		},
 	}
 	var out bytes.Buffer
-	if err := herdrSetup(context.Background(), deps, f.config(path), answers("", "", ""), &out); err != nil {
+	if err := herdrSetup(context.Background(), deps, f.config(path), answers("", ""), &out, ""); err != nil {
 		t.Fatal(err)
 	}
-	if !fixed || !strings.Contains(out.String(), "set up. Press Ctrl+b, then a") {
-		t.Fatalf("fixed = %v; output:\n%s", fixed, out.String())
+	if strings.Contains(out.String(), "macOS firewall") || strings.Contains(out.String(), "password") {
+		t.Fatalf("setup mentioned the firewall:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "set up. Press Ctrl+b, then a") {
+		t.Fatalf("output:\n%s", out.String())
 	}
 }
 

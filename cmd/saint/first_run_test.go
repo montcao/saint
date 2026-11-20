@@ -17,8 +17,9 @@ import (
 	"github.com/montcao/saint/internal/store"
 )
 
-func answers(lines ...string) *bufio.Reader {
-	return bufio.NewReader(strings.NewReader(strings.Join(lines, "\n") + "\n"))
+// answers is a prompter over scripted answers, with nothing to discard.
+func answers(lines ...string) *prompter {
+	return &prompter{Reader: bufio.NewReader(strings.NewReader(strings.Join(lines, "\n") + "\n"))}
 }
 
 // A missing image is built after a yes, and a missing credential is asked
@@ -34,7 +35,7 @@ func TestFirstRunBuildsTheImageAndAsksForACredential(t *testing.T) {
 			return nil
 		},
 		credentialReady: func(context.Context, sandbox.Runtime) bool { return added },
-		addCredential: func(context.Context, sandbox.Runtime, *bufio.Reader, io.Writer) error {
+		addCredential: func(context.Context, sandbox.Runtime, *prompter, io.Writer) error {
 			added = true
 			return nil
 		},
@@ -165,11 +166,6 @@ func TestStableBinaryLivesInTheStateDirectory(t *testing.T) {
 	st := store.New(root)
 	if got, want := stableBinaryPath(st), filepath.Join(st.Paths().Root, "bin", "saint"); got != want {
 		t.Errorf("stableBinaryPath = %s, want %s", got, want)
-	}
-	for _, args := range firewallArgs("/state/bin/saint") {
-		if args[0] != "sudo" || args[1] != socketFilterFW || args[len(args)-1] != "/state/bin/saint" {
-			t.Errorf("firewall call = %q", args)
-		}
 	}
 }
 

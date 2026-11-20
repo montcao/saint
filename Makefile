@@ -87,7 +87,8 @@ commitlint-range:
 	$(COMMITLINT) --from "$(FROM)" --to "$(TO)"
 
 # Allow the proxy to accept connections from containers. The proxy runs from
-# saint's copy in the state directory, so that is the path allowed. Needs sudo.
+# saint's copy in the state directory, so that is the path allowed. macOS asks
+# for an administrator's password in a dialog.
 allow-firewall: build
 	./$(BIN) firewall
 
