@@ -67,5 +67,6 @@ remember.
 | What saint does and does not protect | [`SECURITY.md`](SECURITY.md) |
 | Configuration, billing modes, known limits | [`docs/guide/configuration.md`](docs/guide/configuration.md) |
 | Known gaps and what would close them | [`docs/plans/tech-debt.md`](docs/plans/tech-debt.md) |
+| Decided work not yet started | [`docs/plans/roadmap.md`](docs/plans/roadmap.md) |
 | Reviewing a branch; checking docs against code | [`docs/agents/`](docs/agents/) |
 | Every document, what it decides, when it was checked | [`docs/index.md`](docs/index.md) |

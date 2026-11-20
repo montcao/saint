@@ -21,6 +21,7 @@ nothing about whether the document is still true.
 | [`docs/operations/workflow.md`](operations/workflow.md) | operations | commits, branches, pull requests, merging, reporting | Reviewed: 2026-11-09 edited |
 | [`docs/research/gotchas.md`](research/gotchas.md) | research | traps in herdr plugin work and testing that cost real time | Reviewed: 2026-11-09 edited |
 | [`docs/research/spikes.md`](research/spikes.md) | research | runtime behaviour measured rather than assumed, and on which runtime | Reviewed: 2026-11-09 edited |
+| [`docs/plans/roadmap.md`](plans/roadmap.md) | plan | work that is decided but not started, and what each item needs first | Reviewed: 2026-11-20 edited |
 | [`docs/plans/tech-debt.md`](plans/tech-debt.md) | plan | known gaps, what would close each, and which need a decision | Reviewed: 2026-11-09 edited |
 | [`docs/agents/reviewer.md`](agents/reviewer.md) | agent prompt | how an agent reviews a branch against these rules | Reviewed: 2026-11-06 edited |
 | [`docs/agents/doc-gardener.md`](agents/doc-gardener.md) | agent prompt | how an agent checks documents against the code | Reviewed: 2026-11-06 edited |
