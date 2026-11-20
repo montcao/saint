@@ -68,6 +68,34 @@ func (s *Service) resolveAuth(ctx context.Context, cfg store.Config, rt sandbox.
 	if s.Credentials == nil {
 		return warn("no credential source is configured; this session will bill API rates")
 	}
+
+	// With nothing chosen and no default, try the plan token, then the host's
+	// Claude Code login: the order saint auth reports and the first-run check
+	// accepts. Trying only the token slot made a fresh install whose only
+	// credential is the login start key-mode sessions with no key to inject,
+	// while saint auth said they would draw on the plan.
+	specs := []string{spec}
+	if strings.TrimSpace(chosen) == "" && strings.TrimSpace(cfg.DefaultCredential) == "" && spec != credential.ClaudeCodeSpec {
+		specs = []string{spec, credential.ClaudeCodeSpec}
+	}
+	var fallback authChoice
+	for i, sp := range specs {
+		choice := s.trySubscription(ctx, sp, warn)
+		if choice.Mode == sandbox.AuthSubscription {
+			return choice
+		}
+		// Keep the first reason worth saying; a later source being absent
+		// does not replace it.
+		if i == 0 || (fallback.Warning == "" && choice.Warning != "") {
+			fallback = choice
+		}
+	}
+	return fallback
+}
+
+// trySubscription reads one credential spec and returns a subscription choice
+// when it is usable, or a key-mode choice saying why not.
+func (s *Service) trySubscription(ctx context.Context, spec string, warn func(string, ...any) authChoice) authChoice {
 	source, err := s.Credentials(spec)
 	if err != nil {
 		return warn("credential %q is unusable (%v); this session will bill API rates", spec, err)
