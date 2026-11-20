@@ -197,7 +197,7 @@ func TestAttachCmdDetachesStaleClients(t *testing.T) {
 	}
 
 	joined := strings.Join(cmd.Args, " ")
-	if !strings.Contains(joined, "tmux new-session -A -D -s agent") {
+	if !strings.Contains(joined, "tmux -u new-session -A -D -s agent") {
 		t.Errorf("attach command = %q, want attach-or-create with other clients detached", joined)
 	}
 }
@@ -381,5 +381,35 @@ func TestCreateSwitchesOffClaudeTelemetry(t *testing.T) {
 	}
 	if strings.Contains(string(data), "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC") {
 		t.Error("a Codex session got Claude Code's telemetry switches")
+	}
+}
+
+// `container exec` gives the guest TERM=xterm and no locale, so tmux treated
+// every pane as an 8-colour terminal without UTF-8 and drew the agent's
+// box-drawing and spinner characters at the wrong widths: lines overlapped.
+// Both the attaching client and the server the bootstrap starts need UTF-8.
+func TestAttachAndBootstrapDeclareAUTF8Terminal(t *testing.T) {
+	t.Parallel()
+
+	cmd, err := NewAppleContainer("/usr/local/bin/container", nil).AttachCmd("saint-abc123", AttachOptions{})
+	if err != nil {
+		t.Fatalf("AttachCmd() error = %v", err)
+	}
+	joined := strings.Join(cmd.Args, " ")
+	for _, want := range []string{"-e TERM=xterm-256color", "-e LANG=C.UTF-8", "tmux -u "} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("attach command = %q, want it to contain %q", joined, want)
+		}
+	}
+	if strings.Index(joined, "-e TERM=") > strings.Index(joined, "saint-abc123") {
+		t.Errorf("attach command = %q: -e must come before the container name, or the guest runs it as a command", joined)
+	}
+
+	script, err := runtimeBootstrapScript(RuntimeClaude, "/work", CreateOptions{})
+	if err != nil {
+		t.Fatalf("runtimeBootstrapScript() error = %v", err)
+	}
+	if !strings.Contains(script, "export LANG=C.UTF-8") {
+		t.Errorf("bootstrap does not give the tmux server and agent a UTF-8 locale:\n%s", script)
 	}
 }

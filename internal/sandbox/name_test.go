@@ -92,7 +92,9 @@ func TestAttachCmdBuildsExpectedArgv(t *testing.T) {
 	}
 	// new-session -A, not attach: a container whose tmux server has died must
 	// still be recoverable.
-	want := []string{"/opt/homebrew/bin/container", "exec", "-it", "saint-abc123", "tmux", "new-session", "-A", "-D", "-s", "agent"}
+	want := []string{"/opt/homebrew/bin/container", "exec", "-it",
+		"-e", "TERM=xterm-256color", "-e", "LANG=C.UTF-8",
+		"saint-abc123", "tmux", "-u", "new-session", "-A", "-D", "-s", "agent"}
 	if len(cmd.Args) != len(want) {
 		t.Fatalf("Args = %#v", cmd.Args)
 	}
