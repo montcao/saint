@@ -14,7 +14,7 @@ command = ["sh", "scripts/plugin-build"]
 # --plugin saint. It opens the setup pane below, which offers to bind keys.
 [[actions]]
 id = "setup"
-title = "saint: set up (keys, image, credential, firewall)"
+title = "saint: set up (keys, image, credential)"
 contexts = ["workspace"]
 command = ["./saint", "herdr", "setup"]
 
@@ -62,3 +62,10 @@ id = "egress"
 title = "saint: network access"
 placement = "split"
 command = ["./saint", "herdr", "egress"]
+
+# Opened alongside the agent session with SAINT_ACTIVITY_SESSION set.
+[[panes]]
+id = "activity"
+title = "saint: session activity"
+placement = "split"
+command = ["./saint", "herdr", "activity"]

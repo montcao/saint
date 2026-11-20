@@ -487,15 +487,19 @@ func releaseAgentArgs(paneID, agent string) []string {
 // pane made active first (herdr opens overlays only on the active pane), which
 // switches workspace under whoever is typing elsewhere.
 func promptOpenArgs(paneID, sessionID, stateDir string) []string {
+	return sessionSplitArgs(herdrEgressEntrypoint, envEgressSession, paneID, sessionID, stateDir)
+}
+
+func sessionSplitArgs(entrypoint, sessionEnv, paneID, sessionID, stateDir string) []string {
 	return []string{
 		"plugin", "pane", "open",
 		"--plugin", herdrPluginID,
-		"--entrypoint", herdrEgressEntrypoint,
+		"--entrypoint", entrypoint,
 		"--placement", "split",
 		"--direction", "down",
 		"--target-pane", paneID,
 		"--no-focus",
-		"--env", envEgressSession + "=" + sessionID,
+		"--env", sessionEnv + "=" + sessionID,
 		// The prompt is started by herdr, not by this process, so it is told
 		// which state directory - and so which proxy - it answers.
 		"--env", store.StateDirEnv + "=" + stateDir,

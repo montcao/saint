@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"github.com/montcao/saint/internal/proxy"
 )
@@ -36,8 +37,10 @@ const (
 	// journalKindTunnel is forward-proxied traffic. It carries fewer fields on
 	// purpose: a CONNECT has no path, no provider, and no status saint can
 	// honestly report once the connection is hijacked.
-	journalKindTunnel = "tunnel"
-	journalKindUsage  = "usage"
+	journalKindTunnel         = "tunnel"
+	journalKindUsage          = "usage"
+	journalKindUpstreamError  = "upstream_error"
+	journalKindUpstreamStatus = "upstream_status"
 
 	// journalKindEgress is a ruling on a host a session asked to reach
 	// through the forward proxy: allowed or denied, and why (the shipped
@@ -103,8 +106,11 @@ type journalRecord struct {
 	// key or forwarded the guest's own subscription credential.
 	Auth string `json:"auth,omitempty"`
 
-	Status     int   `json:"status,omitempty"`
-	DurationMS int64 `json:"duration_ms,omitempty"`
+	Status     int               `json:"status,omitempty"`
+	DurationMS int64             `json:"duration_ms,omitempty"`
+	ErrorType  string            `json:"error_type,omitempty"`
+	RetryAfter string            `json:"retry_after,omitempty"`
+	RateLimits map[string]string `json:"rate_limits,omitempty"`
 
 	Model   string `json:"model,omitempty"`
 	Stream  bool   `json:"stream,omitempty"`
@@ -135,6 +141,7 @@ type journal struct {
 	closed    atomic.Bool
 	closeOnce sync.Once
 	dropped   atomic.Int64
+	activity  activityFeed
 
 	// beforeWrite runs on the writer goroutine before each line is encoded. It
 	// is nil in production; tests install it before starting the writer, to hold
@@ -239,10 +246,15 @@ func (j *journal) flushDropped(at time.Time) {
 }
 
 func (j *journal) writeLine(rec journalRecord) {
+	rec = rec.sanitized()
+	j.activity.publish(rec)
+	if rec.Kind == journalKindUpstreamStatus {
+		return // Live status; per-request records already carry HTTP status.
+	}
 	if j.beforeWrite != nil {
 		j.beforeWrite()
 	}
-	line, err := json.Marshal(rec.sanitized())
+	line, err := json.Marshal(rec)
 	if err != nil {
 		return
 	}
@@ -394,7 +406,7 @@ func egressRecord(ev proxy.DecisionEvent, at time.Time) journalRecord {
 // cannot push a rotation's worth of records out of the file.
 func journalText(value string) string {
 	cleaned := strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
 			return -1
 		}
 		return r
@@ -434,6 +446,14 @@ func usageRecord(ev proxy.UsageEvent, at time.Time) journalRecord {
 		}
 	}
 	return rec
+}
+
+func upstreamErrorRecord(ev proxy.UpstreamErrorEvent, at time.Time) journalRecord {
+	return journalRecord{
+		Time: at, Kind: journalKindUpstreamError, SessionID: ev.SessionID,
+		Provider: ev.Provider, Status: ev.Status, ErrorType: ev.Type,
+		RetryAfter: ev.RetryAfter, RateLimits: ev.RateLimits,
+	}
 }
 
 // journalHandler records what crossed the proxy: the fields only the request

@@ -28,9 +28,11 @@ import (
 // JSON object per line in each direction.
 
 const (
-	controlOpPing   = "ping"
-	controlOpListen = "listen"
-	controlOpEgress = "egress"
+	controlOpPing          = "ping"
+	controlOpListen        = "listen"
+	controlOpEgress        = "egress"
+	controlOpActivity      = "activity"
+	controlOpActivityOwner = "activity-owner"
 
 	// controlTimeout bounds a ping or listen exchange. Listening can wait for a
 	// session's gateway to come up, which takes under a second when measured.
@@ -47,6 +49,7 @@ var errProxyRunning = errors.New("a saint proxy is already running for this stat
 type controlRequest struct {
 	Op      string `json:"op"`
 	Session string `json:"session,omitempty"`
+	Stream  string `json:"stream,omitempty"`
 }
 
 type controlResponse struct {
@@ -86,6 +89,7 @@ type controlHandlers struct {
 	listeners func() []string
 	listen    func(ctx context.Context, sessionID string) (string, error)
 	egress    func(sessionID string, conn *controlConn)
+	activity  func(req controlRequest, conn *controlConn)
 }
 
 // controlConn is one connection's line-delimited JSON, in both directions.
@@ -196,6 +200,12 @@ func handleControl(conn net.Conn, h controlHandlers, logf func(string, ...any)) 
 			return
 		}
 		h.egress(req.Session, c)
+	case controlOpActivity, controlOpActivityOwner:
+		if h.activity == nil {
+			_ = c.send(controlResponse{Error: "this proxy does not stream session activity"})
+			return
+		}
+		h.activity(req, c)
 	default:
 		_ = c.send(controlResponse{Error: fmt.Sprintf("unknown operation %q", req.Op)})
 	}
@@ -209,6 +219,8 @@ func controlCall(ctx context.Context, path string, req controlRequest) (controlR
 		return controlResponse{}, err
 	}
 	defer conn.Close()
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
 	deadline := time.Now().Add(controlTimeout)
 	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
 		deadline = dl

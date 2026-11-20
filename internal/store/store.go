@@ -38,6 +38,10 @@ type Session struct {
 	// approval prompts.
 	SkipPermissions bool `json:"skip_permissions,omitempty"`
 
+	// Direct means the pane owns the agent process and its VM lifetime. Rows
+	// written before direct panes use the legacy tmux attach path.
+	Direct bool `json:"direct,omitempty"`
+
 	// Credential names the source this session's credential came from, using
 	// the same specs as Config.Credentials. Empty means an API key.
 	Credential string `json:"credential,omitempty"`

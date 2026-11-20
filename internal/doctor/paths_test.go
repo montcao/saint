@@ -84,7 +84,7 @@ func TestImageBuildContextUsesPlaceholderWhenRootUnknown(t *testing.T) {
 }
 
 func TestBuildImagesRefusesUnknownRepoRoot(t *testing.T) {
-	err := BuildImages(t.Context(), "/usr/bin/true", "")
+	err := BuildImages(t.Context(), "/usr/bin/true", "", nil)
 	if err == nil {
 		t.Fatal("BuildImages with an unknown repo root must return an error")
 	}

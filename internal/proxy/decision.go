@@ -219,3 +219,14 @@ var claudeTelemetryHosts = []string{
 func ClaudeTelemetryHosts() []string {
 	return slices.Clone(claudeTelemetryHosts)
 }
+
+// IsClaudeTelemetryHost reports whether host matches Claude Code's known
+// background traffic rules.
+func IsClaudeTelemetryHost(host string) bool {
+	for _, rule := range claudeTelemetryHosts {
+		if matchHostRule(rule, host) {
+			return true
+		}
+	}
+	return false
+}

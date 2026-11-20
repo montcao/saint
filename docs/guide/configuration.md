@@ -209,9 +209,16 @@ saint allow -rm example.com  # remove a saved host; it is asked about again
 
 Saved hosts live in `proxy_allow_hosts` in `~/.saint/config.json`, and a change
 applies from the next request. Every decision is in the request journal
-(`saint proxy log`) with its reason: shipped allowlist, saved rule, answered,
-or no answer. saint sees the host and the bytes crossing; it never sees inside
-TLS, so a host you allow can be sent anything.
+(`saint proxy log`) with its reason. saint sees the host and the bytes crossing.
+Forward-proxied TLS remains opaque, so a host you allow can be sent anything.
+
+When you attach in herdr, the session's activity split opens without taking
+focus. It shows host decisions, marks known Claude Code telemetry hosts, and
+prints provider HTTP status and measured usage. It summarizes repeated
+identical host decisions as the next event arrives. Closing the activity split
+leaves the agent alone. It reopens on the next attach. The view starts with
+that attachment's activity and reports gaps if its queue falls behind. Use
+`saint proxy log` for history.
 
 ### Claude Code's own traffic
 
@@ -235,6 +242,15 @@ its intake accepts logs for any Datadog account, so an allowed guest could send
 data to an account of its own.
 
 ## Sessions
+
+### Closing and reopening
+
+An agent runs in the microVM's terminal for as long as its pane is open.
+Closing the pane or quitting the agent stops the microVM. `saint attach`
+opens one agent in the same microVM again, with its guest files still there.
+The agent's own history controls which conversation it can resume. An initial
+prompt passed to `saint new -p` runs once. New sessions create no tmux
+transcript. Existing tmux sessions still use their original attach behavior.
 
 ### What a session can see
 
@@ -271,10 +287,21 @@ saint does not accept Claude Code's bypass-permissions screen for you. The first
 time a session starts, Claude Code asks, and accepting it is your statement that
 the microVM, not the agent's prompts, is the boundary.
 
-The images pin exact agent versions, and sessions run with
-`DISABLE_UPDATES=1` so an agent cannot fetch and execute a new version of
-itself inside the sandbox. Update a runtime by bumping the version in
-`images/<runtime>/Dockerfile` and rebuilding; `saint doctor` prints the command.
+The Debian-based images install checksum-verified native agents and include
+a shell, Git and trusted CA certificates. The agents are root-owned, and
+`DISABLE_UPDATES=1` disables Claude Code's self-update paths. Update a runtime
+by changing the version and both architecture checksums in its `runtime.lock`
+under `images/`. Run `saint doctor --build-images` to rebuild images for new
+sessions. Existing images with the expected tag are reused until rebuilt.
+
+### Cleaning up build resources
+
+Apple `container` uses a shared `buildkit` VM for image builds. `saint doctor`
+reports whether it is running and the allocated size of its container
+directory when available. Build a project's images as usual, then run
+`container builder stop` once every build on the host has finished. This stops
+the VM and keeps cached data and built images. When removing saint, check for
+the builder separately from saint's session microVMs and images.
 
 ### Agents and providers
 
@@ -316,6 +343,10 @@ retained; only counters and the model name survive.
 Per-request records and usage go to `~/.saint/proxy.jsonl`, read back with
 `saint proxy log` (`--session`, `--json`, `-n`). The journal holds session IDs,
 methods, paths, providers, auth modes, statuses, durations and token counters.
+For non-2xx provider responses it also holds the upstream status, recognized
+error type, valid `Retry-After`, and recognized Anthropic rate-limit values,
+including the subscription windows. Error messages are omitted because a
+provider can echo request data.
 Never a credential, a session token, a prompt or a response body.
 
 Writing never blocks a request; a full queue drops records and writes the count
@@ -324,6 +355,6 @@ size:
 
 | Key | Default | Meaning |
 |---|---|---|
-| `proxy_log_requests` | `true` for a new install | write per-request records; usage is always written |
+| `proxy_log_requests` | `true` for a new install | write per-request records; usage and upstream diagnostics are always written |
 | `proxy_log_max_bytes` | `4194304` | rotate at this size |
 | `proxy_log_keep_files` | `5` | files retained, so at most ~20 MiB |

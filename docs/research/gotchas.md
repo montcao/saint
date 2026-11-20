@@ -14,9 +14,9 @@ Do not rediscover these.
   commands run from it act on the live session. Test against a named session
   (`herdr --session <name> server`) and point `HERDR_SOCKET_PATH` at its
   socket. The plugin registry is global per user even then.
-- **The proxy cannot bind before the first container exists.** The bridge
-  address appears only while a container is attached, so start the container,
-  then the proxy (`docs/research/spikes.md`).
+- **The proxy daemon and its session listener start separately.** The daemon
+  can start before the microVM. The listener binds the bridge address only
+  after the microVM attaches to the network (`docs/research/spikes.md`).
 - **A fresh state directory needs a local port.** The first run binds
   `127.0.0.1:0` to choose the proxy port, so in an agent sandbox that forbids
   local binding even `saint proxy log` fails with `choose proxy port: ...
