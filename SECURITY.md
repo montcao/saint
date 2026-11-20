@@ -60,7 +60,9 @@ rather than a vulnerability:
 - **A host you allow is allowed for every session, and for everything on it.**
   The policy is per hostname: it does not see paths or content, so data can
   leave through any allowed host, the shipped ones (GitHub, the package
-  registries, the provider APIs) included. Claude Code's telemetry hosts are
+  registries, the provider APIs) included. GitHub's user-content hosts
+  (`raw.githubusercontent.com`, `objects.githubusercontent.com`), which serve
+  any account's files, are not shipped allowed: the first request asks. Claude Code's telemetry hosts are
   shipped allowed too, and a Datadog intake accepts logs for any Datadog
   account, not only Anthropic's; `saint telemetry off` refuses them.
 - **Sessions created before per-session networks** stay on the runtime's shared
