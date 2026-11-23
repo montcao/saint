@@ -20,6 +20,7 @@ import (
 // against a pipe served by the prompter, the way the real pane connects to
 // the control socket.
 type fakeHerdr struct {
+	workers sync.WaitGroup
 	mu      sync.Mutex
 	calls   [][]string
 	failOn  string
@@ -51,8 +52,13 @@ func (f *fakeHerdr) run(_ context.Context, pane store.HerdrPane, args ...string)
 	if len(args) > 2 && args[0] == "plugin" && f.prompt != nil {
 		server, client := net.Pipe()
 		sessionID := strings.TrimPrefix(args[slices.Index(args, "--env")+1], envEgressSession+"=")
-		go f.prompts.servePrompt(sessionID, newControlConn(server))
+		f.workers.Add(2)
 		go func() {
+			defer f.workers.Done()
+			f.prompts.servePrompt(sessionID, newControlConn(server))
+		}()
+		go func() {
+			defer f.workers.Done()
 			defer client.Close()
 			f.prompt(newControlConn(client))
 		}()
@@ -103,7 +109,16 @@ func testPrompter(t *testing.T, sessions map[string]store.Session) (*egressPromp
 		now:      time.Now,
 		state:    map[string]*promptState{},
 	}
-	p.broker = egress.New(func(id string) { go p.sync(id) })
+	p.broker = egress.New(func(id string) {
+		fake.workers.Add(1)
+		go func() {
+			defer fake.workers.Done()
+			p.sync(id)
+		}()
+	})
+	// Every callback and its child prompt workers finish before testing tears
+	// down t.Logf/t.Errorf. Waiting only for the broker answer is not enough.
+	t.Cleanup(fake.workers.Wait)
 	fake.prompts = p
 	return p, fake, saved
 }

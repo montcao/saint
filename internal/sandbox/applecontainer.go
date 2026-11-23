@@ -12,6 +12,7 @@ import (
 )
 
 type AppleContainer struct {
+	profileRoot   string
 	containerPath string
 	logf          func(string, ...any)
 }
@@ -171,6 +172,9 @@ func (a *AppleContainer) Create(ctx context.Context, name string, rt Runtime, re
 		return err
 	}
 
+	if opts.ExperimentalProfile != "" {
+		return a.createProfile(ctx, name, rt, repos, sessionDir, opts, args, script)
+	}
 	args = append(args, "saint/"+string(rt)+":latest", "sh", "-lc", script)
 	_, _, err = a.run(ctx, args...)
 	return err
@@ -185,6 +189,10 @@ func (a *AppleContainer) List(ctx context.Context) ([]Info, error) {
 }
 
 func (a *AppleContainer) Stop(ctx context.Context, name string) error {
+	if _, err := a.profileOperation(ctx, name, "check"); err != nil {
+		return err
+	}
+
 	if err := ValidateContainerName(name); err != nil {
 		return fmt.Errorf("stop: %w", err)
 	}
@@ -193,6 +201,20 @@ func (a *AppleContainer) Stop(ctx context.Context, name string) error {
 }
 
 func (a *AppleContainer) Start(ctx context.Context, name string) error {
+	if handled, err := a.profileOperation(ctx, name, "check"); err != nil {
+		return err
+	} else if handled {
+		inventory, err := a.List(ctx)
+		if err != nil {
+			return err
+		}
+		for _, vm := range inventory {
+			if vm.Name == name && vm.State == StateRunning {
+				return nil
+			}
+		}
+	}
+
 	if err := ValidateContainerName(name); err != nil {
 		return fmt.Errorf("start: %w", err)
 	}
@@ -201,6 +223,12 @@ func (a *AppleContainer) Start(ctx context.Context, name string) error {
 }
 
 func (a *AppleContainer) Remove(ctx context.Context, name string) error {
+	if handled, err := a.profileOperation(ctx, name, "remove"); err != nil {
+		return err
+	} else if handled {
+		return nil
+	}
+
 	if err := ValidateContainerName(name); err != nil {
 		return fmt.Errorf("remove: %w", err)
 	}
@@ -217,6 +245,9 @@ const (
 )
 
 func (a *AppleContainer) AttachCmd(name string, opts AttachOptions) (*exec.Cmd, error) {
+	if _, err := a.profileOperation(context.Background(), name, "check"); err != nil {
+		return nil, err
+	}
 	if err := ValidateContainerName(name); err != nil {
 		return nil, fmt.Errorf("attach: %w", err)
 	}

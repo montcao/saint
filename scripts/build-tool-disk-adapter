@@ -1,0 +1,31 @@
+#!/bin/sh
+# Build only: never install or restart Apple's runtime.
+set -eu
+repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+output=${1:-"$repo/dist/ToolDiskAdapter"}
+case "$output" in /*) ;; *) echo 'output must be absolute' >&2; exit 2;; esac
+scratch=$(mktemp -d /private/tmp/saint-adapter.XXXXXX)
+trap 'rm -rf -- "$scratch"' EXIT HUP INT TERM
+swift=$(xcrun --find swift)
+# Some CLT installations ship stale private SwiftPM interfaces. Copy only the
+# public interfaces into our own scratch library; never edit the installed SDK.
+python3 - "$swift" "$scratch" <<'PY'
+from pathlib import Path
+import shutil,sys
+source=Path(sys.argv[1]).parent.parent/'lib/swift/pm'
+target=Path(sys.argv[2])/'swiftpm-libs';target.mkdir()
+for item in source.iterdir():
+    if item.name in ('ManifestAPI','PluginAPI'):
+        shutil.copytree(item,target/item.name,ignore=shutil.ignore_patterns('*.private.swiftinterface'))
+    else:
+        (target/item.name).symlink_to(item)
+PY
+export SWIFTPM_CUSTOM_LIBS_DIR="$scratch/swiftpm-libs"
+export CLANG_MODULE_CACHE_PATH="$scratch/module-cache"
+swift build --package-path "$repo/tools/tool-disk-adapter" \
+    --scratch-path "$scratch/build" --cache-path "$scratch/cache" \
+    --config-path "$scratch/config" --security-path "$scratch/security" \
+    --force-resolved-versions -j 4
+mkdir -p -- "$(dirname -- "$output")"
+install -m 0700 "$scratch/build/debug/ToolDiskAdapter" "$output"
+shasum -a 256 "$output"

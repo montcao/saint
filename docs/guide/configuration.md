@@ -327,3 +327,12 @@ size:
 | `proxy_log_requests` | `true` for a new install | write per-request records; usage is always written |
 | `proxy_log_max_bytes` | `4194304` | rotate at this size |
 | `proxy_log_keep_files` | `5` | files retained, so at most ~20 MiB |
+
+## Experimental tool disk profile
+
+An explicitly selected, checksum-pinned Mac tool profile is available for draft
+validation via `saint new --experimental-profile /absolute/manifest.json#sha256`
+or `saint herdr open claude --experimental-profile /absolute/manifest.json#sha256`.
+There is no default configuration option. It requires the separately built Swift
+helper and the pinned newer Apple runtime; it refuses the older daemon without
+changing it. See [the experiment contract and release gates](../research/tool-profile/README.md).

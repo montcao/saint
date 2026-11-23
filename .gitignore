@@ -59,3 +59,14 @@ coverage.*
 *.env
 *.pem
 *.key
+
+# Optional Swift adapter local build state (the lockfile is committed).
+/tools/tool-disk-adapter/.build/
+/tools/tool-disk-adapter/.swiftpm/
+
+# Private experiment output must remain outside public changes.
+*.private.json
+*.private.log
+/docs/research/tool-profile/results.md
+/docs/research/tool-profile/herdr-gate-macos.json
+/docs/research/tool-profile/validation.txt

@@ -25,14 +25,15 @@ func ValidSessionID(id string) bool {
 }
 
 type Session struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Repos     []sandbox.Repo  `json:"repos"`
-	Runtime   sandbox.Runtime `json:"runtime"`
-	MemoryGB  int             `json:"memory_gb"`
-	CPUs      int             `json:"cpus"`
-	CreatedAt time.Time       `json:"created_at"`
-	LastRunAt time.Time       `json:"last_run_at"`
+	ExperimentalProfile string          `json:"experimental_profile,omitempty"`
+	ID                  string          `json:"id"`
+	Name                string          `json:"name"`
+	Repos               []sandbox.Repo  `json:"repos"`
+	Runtime             sandbox.Runtime `json:"runtime"`
+	MemoryGB            int             `json:"memory_gb"`
+	CPUs                int             `json:"cpus"`
+	CreatedAt           time.Time       `json:"created_at"`
+	LastRunAt           time.Time       `json:"last_run_at"`
 
 	// SkipPermissions records whether this session's agent runs without its
 	// approval prompts.
