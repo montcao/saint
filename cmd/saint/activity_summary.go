@@ -100,7 +100,7 @@ func summaryTitle(v summarySnapshot, session store.Session) string {
 	return fmt.Sprintf("saint proxy | hosts reached %d%s | refusals %d | %s | since proxy start", v.hosts, suffix, v.refusals, custody)
 }
 func summaryArgs(paneID, title string) []string {
-	return []string{"pane", "report-metadata", paneID, "--title", title}
+	return []string{"pane", "report-metadata", paneID, "--source", "saint-proxy", "--title", title}
 }
 func (s *activitySummary) loop() {
 	defer close(s.done)

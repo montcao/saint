@@ -28,7 +28,7 @@ func TestSummaryChangesOnlyAndPreservesCustody(t *testing.T) {
 		t.Helper()
 		select {
 		case args := <-reports:
-			if len(args) != 5 || args[1] != "report-metadata" || args[3] != "--title" || !strings.Contains(args[4], want) {
+			if len(args) != 7 || args[1] != "report-metadata" || args[3] != "--source" || args[4] != "saint-proxy" || args[5] != "--title" || !strings.Contains(args[6], want) {
 				t.Fatalf("unexpected report %q, want %s", args, want)
 			}
 		case <-time.After(time.Second):
