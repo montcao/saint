@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -123,10 +122,7 @@ func buildRuntimeImage(containerPath string) func(context.Context, sandbox.Runti
 		if root == "" {
 			return errors.New("cannot find saint's images/ directory beside this binary")
 		}
-		cmd := exec.CommandContext(ctx, containerPath, "build", "-t", "saint/"+string(rt)+":latest", filepath.Join(root, "images", string(rt)))
-		cmd.Stdout = out
-		cmd.Stderr = out
-		return cmd.Run()
+		return sandbox.BuildRuntimeImage(ctx, containerPath, root, string(rt), out)
 	}
 }
 

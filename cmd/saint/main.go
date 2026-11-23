@@ -246,7 +246,7 @@ func runDoctor(ctx context.Context, st *store.Store, kc *keychain.Keychain, cont
 	}
 	fmt.Print(doctor.Format(results))
 	if *buildImages {
-		if err := doctor.BuildImages(ctx, containerPath, repoRoot); err != nil {
+		if err := doctor.BuildImages(ctx, containerPath, repoRoot, os.Stdout); err != nil {
 			return fmt.Errorf("build images: %w", err)
 		}
 	}
