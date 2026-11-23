@@ -14,6 +14,7 @@ type driver struct {
 	bin     string
 	timeout time.Duration
 	prefix  string
+	timings *[]latencyPair
 }
 
 func (d driver) call(ctx context.Context, args ...string) (string, error) {
@@ -108,6 +109,7 @@ func paneID(raw string) (string, error) {
 	return id, nil
 }
 func (d driver) open(ctx context.Context, o options) (host, saint string, err error) {
+	start := time.Now()
 	raw, err := d.call(ctx, "pane", "split", o.target, "--direction", "right", "--cwd", o.repo, "--no-focus")
 	if err != nil {
 		return
@@ -120,6 +122,11 @@ func (d driver) open(ctx context.Context, o options) (host, saint string, err er
 	if err != nil {
 		return
 	}
+	if err = d.waitReady(ctx, host, o.ready); err != nil {
+		return
+	}
+	hostMS := elapsedMS(start)
+	start = time.Now()
 	raw, err = d.call(ctx, "plugin", "pane", "open", "--plugin", "saint", "--entrypoint", "session", "--placement", "split", "--direction", "down", "--target-pane", o.target, "--no-focus", "--env", "SAINT_REPO="+o.repo, "--env", "SAINT_RUNTIME="+o.agent)
 	if err != nil {
 		return
@@ -128,11 +135,27 @@ func (d driver) open(ctx context.Context, o options) (host, saint string, err er
 	if err != nil {
 		return
 	}
-	for _, pane := range []string{host, saint} {
-		_, err = d.call(ctx, "pane", "wait-output", pane, "--match", o.ready, "--source", "recent-unwrapped", "--timeout", strconv.FormatInt(o.timeout.Milliseconds(), 10))
-		if err != nil {
-			return
-		}
+	if err = d.waitReady(ctx, saint, o.ready); err != nil {
+		return
+	}
+	if d.timings != nil {
+		*d.timings = append(*d.timings, latencyPair{hostMS, elapsedMS(start)})
 	}
 	return
+}
+
+func (d driver) waitReady(ctx context.Context, pane, ready string) error {
+	if _, err := d.call(ctx, "pane", "wait-output", pane, "--match", ready, "--source", "recent-unwrapped", "--timeout", strconv.FormatInt(d.timeout.Milliseconds(), 10)); err != nil {
+		return err
+	}
+	// Do not trust an exit code alone: some CLI versions return a JSON timeout
+	// result successfully. Confirm that the observed screen contains the marker.
+	text, err := d.call(ctx, "pane", "read", pane, "--source", "recent-unwrapped", "--lines", "1000", "--format", "text")
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(text, ready) {
+		return fmt.Errorf("pane did not reach the configured ready marker")
+	}
+	return nil
 }

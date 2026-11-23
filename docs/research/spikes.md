@@ -292,45 +292,94 @@ through the wrapper.
 ## Pane parity harness: baseline not recorded
 
 `make parity` drives host and saint panes with herdr send-text, send-keys,
-wait-output and read. Its CLI arguments follow the herdr 0.9.5 source.
-This harness has unit tests on Linux; it has not run against Apple container
-or live herdr panes. No Mac baseline, score, latency distribution or visual
-parity result has been recorded.
+wait-output and read. Arguments and response envelopes follow herdr 0.9.5.
+The implementation is tested on Linux; no real Mac baseline, parity score,
+startup timing distribution or visual/lifecycle result has been recorded.
 
-On a Mac with Apple container, herdr, saint's plugin and an authenticated
-agent, open two dedicated idle agent panes in the same repository, then run:
+### Run automated comparisons on a Mac
 
-```sh
-make parity PARITY_ARGS='-host-pane w1:p2 -saint-pane w1:p3'
-```
-
-Or let the harness open dedicated panes beside a target. Supply an absolute
-repository path and literal text that identifies the agent's ready prompt:
+Use Apple container, herdr, saint's installed plugin and an authenticated
+agent. Target two dedicated idle agent panes in the same repository:
 
 ```sh
-make parity PARITY_ARGS='-target-pane w1:p1 -repo /path/to/repo -ready "ready prompt text"'
+make parity PARITY_ARGS='-host-pane w1:p2 -saint-pane w1:p3 -report /tmp/parity-run.json'
 ```
 
-The default agent is Claude; choose `-agent codex` for Codex. The default shell
-prefix is `!`, so commands run through the agent's shell mode rather than
-being submitted as model prompts. Confirm the pinned agent supports this
-mode before running; use `-shell-prefix=""` only with dedicated shell panes.
-Do not target panes containing unsent input or ongoing work. New panes are
-retained for inspection even after failure; close them explicitly afterward.
-The harness does not push commits, change the clipboard or restart herdr.
+Or open fresh pane pairs beside a target with an absolute repository path
+and literal text that appears only when the agent is ready:
 
-Each probe must produce uniquely framed output with exit status zero in both
-panes. Command echo cannot satisfy completion markers. Missing output,
-timeout, either-side failure or different output is a failure. The table
-prints no raw identity or configuration values. Config comparison is limited
-to selected non-credential settings, CLAUDE.md content and skill names; it does
-not establish that plugins/hooks ran or that credentials were excluded.
+```sh
+make parity PARITY_ARGS='-target-pane w1:p1 -repo /path/to/repo -ready "ready prompt text" -runs 5 -report /tmp/parity-run.json'
+```
 
-Visual width, true color, resizing, extended keys, scrollback selection,
-clipboard, title/bell, authenticated fetch/push, effective plugins, prompt
-latency p50/p95, dialog count and close/restart/handoff are listed as
-NOT VERIFIED and kept in the score denominator. They still need observed Mac
-probes before this is a complete acceptance baseline. The command exits
-nonzero for any failed or unverified probe, and refuses to run on Linux.
-Record versions, per-probe results and those observations here when a real
-Mac run is available; do not substitute Linux unit-test results for it.
+The default is one pair. `-runs` accepts 1–20; **every created pane and saint
+session is retained**, including on failure, for inspection. Five pairs create
+ten panes and five guest sessions; ensure enough memory and disk first.
+Close the dedicated panes and stop/delete their saint sessions when finished.
+The harness never closes unrelated panes or silently restarts herdr.
+
+New-pane runs time each CLI open through confirmed ready text, sequentially
+for host then saint. With at least five samples, the table reports raw-count
+nearest-rank p50/p95 in milliseconds. This includes CLI/readback overhead;
+it is not an instrumented keypress latency. The default timing budget is
+saint p50 and p95 no slower than the corresponding host quantiles. Set an
+explicit `-max-startup-ratio` of at least 1 to change that budget; the table
+records it. Fewer than five samples or existing panes leave timing unverified.
+Choose a ready marker that cannot occur in onboarding or a banner, and inspect
+the panes to confirm it means readiness. Agent execution is not inferred from
+herdr's exit code alone.
+
+The default agent is Claude; choose `-agent codex` for Codex. Commands use
+`!` shell mode, not model prompts. Confirm the pinned agent supports it;
+`-shell-prefix=""` is only for dedicated shell panes and does not establish
+agent-input parity. Never target panes with unsent input or active work.
+Ctrl-C cancels outstanding CLI calls; panes already created remain available.
+
+Each automated probe requires uniquely framed output and exit status zero on
+both sides. Echo cannot satisfy completion markers; timeout, missing output,
+either-side failure and different output fail. The report contains result
+summaries and startup samples, not raw configuration or identity values.
+The config comparison covers selected non-credential settings, CLAUDE.md and
+skill names, not plugin execution or credential exclusion.
+
+### Record the remaining observations
+
+`-report` creates two mode-0600 files, refusing to overwrite either:
+
+- The JSON run report contains the run ID, UTC time, herdr/container versions,
+  agent, pane IDs, automated results and any startup samples.
+- Its `.observations.json` companion contains run-bound manual checks with
+  procedures and explicit pass criteria. Null answers mean not verified.
+
+Follow each procedure on the same test run. Record `host_succeeded`,
+`saint_succeeded` and `equivalent` as booleans, plus concrete `evidence`:
+versions, inputs, observations and measurements, without credentials.
+A pass requires both sides to succeed and behave equivalently. Two failures
+are not parity. Leave checks that were not exercised null.
+
+The procedures cover rendered width/color, resize propagation, modified keys
+and CSI-u, scrollback/mouse selection, clipboard, title/bell, authenticated
+fetch/push, effective plugins, default-path dialogs, conversation resume after
+close/restart and update handoff. Use disposable repositories/branches for
+pushes and a dedicated herdr server for disruptive lifecycle checks. The
+clipboard procedure changes the clipboard; preserve and restore its prior
+contents. The dialog probe requires zero dialogs on both configured paths.
+The harness itself does not perform those disruptive actions.
+
+Evaluate the saved run and observations, on any OS, without driving panes:
+
+```sh
+make parity PARITY_ARGS='-evaluate /tmp/parity-run.json -observations /tmp/parity-run.json.observations.json'
+```
+
+Evaluation accepts only the matching run ID/schema and known unique probes.
+It rejects incomplete answers, missing evidence, reduced probe sets and
+attempts to overwrite measured results. Unanswered observations remain in
+the denominator as NOT VERIFIED; an operator-observed pass is labeled as such.
+Files are local operator evidence, not signed attestations. Retain both files
+when sharing a score so the distinction stays reviewable.
+
+Exit status is 0 only when every probe passes, 1 for failure/unverified probes,
+and 2 for invalid input or setup errors. Driving panes is refused on Linux;
+offline evaluation and unit tests do not establish a Mac baseline. Record the
+first real Mac run and observations here before treating parity as accepted.

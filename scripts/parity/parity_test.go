@@ -95,7 +95,7 @@ func TestMatchingFailuresDoNotPass(t *testing.T) {
 	t.Parallel()
 	d := driver{timeout: time.Second, run: func(context.Context, string, ...string) (string, error) { return "", errors.New("missing command") }}
 	results := compareProbes(t.Context(), d, "host", "guest", []probe{{"git", "git --version"}})
-	if passing(results) != 0 || results[0].status != "FAIL" {
+	if passing(results) != 0 || results[0].Status != "FAIL" {
 		t.Fatalf("%+v", results)
 	}
 }
@@ -122,7 +122,7 @@ func TestPaneIDRequiresResponseEnvelope(t *testing.T) {
 	}
 }
 func TestValidatePaneSelection(t *testing.T) {
-	valid := options{host: "w:h", saint: "w:s", agent: "claude", timeout: time.Second}
+	valid := options{runs: 1, maxRatio: 1, host: "w:h", saint: "w:s", agent: "claude", timeout: time.Second}
 	if err := validateOptions(valid); err != nil {
 		t.Fatal(err)
 	}
@@ -149,6 +149,8 @@ func TestOpenUsesHerdrResponseShapes(t *testing.T) {
 		switch args[1] {
 		case "split":
 			return `{"result":{"pane":{"pane_id":"w:h"}}}`, nil
+		case "read":
+			return "ready", nil
 		case "pane":
 			return `{"result":{"plugin_pane":{"pane":{"pane_id":"w:s"}}}}`, nil
 		}
@@ -158,7 +160,7 @@ func TestOpenUsesHerdrResponseShapes(t *testing.T) {
 	if err != nil || host != "w:h" || guest != "w:s" {
 		t.Fatalf("%s %s %v", host, guest, err)
 	}
-	want := []string{"pane split", "pane run", "plugin pane", "pane wait-output", "pane wait-output"}
+	want := []string{"pane split", "pane run", "pane wait-output", "pane read", "plugin pane", "pane wait-output", "pane read"}
 	if !reflect.DeepEqual(verbs, want) {
 		t.Fatalf("%v", verbs)
 	}

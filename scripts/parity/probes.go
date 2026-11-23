@@ -9,11 +9,15 @@ import (
 )
 
 type probe struct{ name, script string }
-type result struct{ name, status, detail string }
+type result struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Detail string `json:"detail"`
+}
 
 func defaultProbes() []probe {
 	probes := []probe{
-		{"TERM", `printf '%s\n' "${TERM-}"`},
+		{"TERM", `test -n "${TERM-}" && printf '%s\n' "$TERM"`},
 		{"COLORTERM", `printf '%s\n' "${COLORTERM-}"`},
 		{"UTF-8 text roundtrip", `printf '%s\n' '界 ─│┌┐└┘'`},
 		{"repository path", `pwd -P`},
@@ -48,20 +52,20 @@ func compareProbes(ctx context.Context, d driver, host, saint string, probes []p
 		id := nonce()
 		a, ea := d.probe(ctx, host, p.script, id+"h")
 		b, eb := d.probe(ctx, saint, p.script, id+"s")
-		r := result{name: p.name, status: "PASS", detail: "matching successful output"}
+		r := result{Name: p.name, Status: "PASS", Detail: "matching successful output"}
 		switch {
 		case ea != nil && eb != nil:
-			r.status = "FAIL"
-			r.detail = "both probes failed"
+			r.Status = "FAIL"
+			r.Detail = "both probes failed"
 		case ea != nil:
-			r.status = "FAIL"
-			r.detail = "host probe failed"
+			r.Status = "FAIL"
+			r.Detail = "host probe failed"
 		case eb != nil:
-			r.status = "FAIL"
-			r.detail = "saint probe failed"
+			r.Status = "FAIL"
+			r.Detail = "saint probe failed"
 		case a != b:
-			r.status = "FAIL"
-			r.detail = "outputs differ"
+			r.Status = "FAIL"
+			r.Detail = "outputs differ"
 		}
 		// Never print probe output: identity/config data can contain private values.
 		results = append(results, r)
@@ -71,7 +75,7 @@ func compareProbes(ctx context.Context, d driver, host, saint string, probes []p
 func passing(results []result) int {
 	n := 0
 	for _, r := range results {
-		if r.status == "PASS" {
+		if r.Status == "PASS" {
 			n++
 		}
 	}
@@ -81,7 +85,7 @@ func printResults(out io.Writer, results []result) {
 	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "PROBE\tRESULT\tDETAIL")
 	for _, r := range results {
-		fmt.Fprintf(w, "%s\t%s\t%s\n", r.name, r.status, strings.ReplaceAll(r.detail, "\n", " "))
+		fmt.Fprintf(w, "%s\t%s\t%s\n", r.Name, r.Status, strings.ReplaceAll(r.Detail, "\n", " "))
 	}
 	_ = w.Flush()
 	if len(results) == 0 {

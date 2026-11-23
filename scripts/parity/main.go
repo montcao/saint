@@ -9,8 +9,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -31,11 +33,14 @@ func execute(ctx context.Context, bin string, args ...string) (string, error) {
 type options struct {
 	host, saint, target, repo, agent, ready, prefix, herdr string
 	timeout                                                time.Duration
+	runs                                                   int
+	maxRatio                                               float64
 }
 
 func main() { os.Exit(mainRun(os.Args[1:], os.Stdout, os.Stderr)) }
 func mainRun(args []string, out, errs io.Writer) int {
 	var o options
+	var reportPath, observationsPath, evaluatePath string
 	fs := flag.NewFlagSet("parity", flag.ContinueOnError)
 	fs.SetOutput(errs)
 	fs.StringVar(&o.host, "host-pane", "", "existing idle host agent pane (paired with -saint-pane)")
@@ -46,12 +51,48 @@ func mainRun(args []string, out, errs io.Writer) int {
 	fs.StringVar(&o.ready, "ready", "", "literal ready text to wait for in newly opened agent panes")
 	fs.StringVar(&o.prefix, "shell-prefix", "!", "agent shell-mode prefix; use empty only for shell panes")
 	fs.StringVar(&o.herdr, "herdr", "herdr", "herdr executable")
+	fs.IntVar(&o.runs, "runs", 1, "fresh pane pairs for startup timing (1-20; every pane and session is retained)")
+	fs.Float64Var(&o.maxRatio, "max-startup-ratio", 1, "maximum saint/host p50 and p95 startup ratio")
+	fs.StringVar(&reportPath, "report", "", "write a new private JSON run report and .observations.json template")
+	fs.StringVar(&evaluatePath, "evaluate", "", "score a saved run report without driving panes")
+	fs.StringVar(&observationsPath, "observations", "", "operator evidence file for -evaluate")
 	fs.DurationVar(&o.timeout, "timeout", 30*time.Second, "timeout per pane operation")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
 		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(errs, "unexpected positional arguments")
+		return 2
+	}
+	if evaluatePath != "" {
+		if observationsPath == "" {
+			fmt.Fprintln(errs, "evaluate requires observations")
+			return 2
+		}
+		err := evaluate(evaluatePath, observationsPath, out)
+		if errors.Is(err, errIncomplete) {
+			return 1
+		}
+		if err != nil {
+			fmt.Fprintln(errs, err)
+			return 2
+		}
+		return 0
+	}
+	if observationsPath != "" {
+		fmt.Fprintln(errs, "observations requires evaluate")
+		return 2
+	}
+	if reportPath != "" {
+		for _, path := range []string{reportPath, reportPath + ".observations.json"} {
+			if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+				fmt.Fprintln(errs, "report output already exists or cannot be inspected:", path)
+				return 2
+			}
+		}
 	}
 	if runtime.GOOS != "darwin" {
 		fmt.Fprintln(errs, "parity requires a real Mac with Apple container and herdr; baseline not recorded")
@@ -61,9 +102,11 @@ func mainRun(args []string, out, errs io.Writer) int {
 		fmt.Fprintln(errs, err)
 		return 2
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-	d := driver{run: execute, bin: o.herdr, timeout: o.timeout, prefix: o.prefix}
+	var timings []latencyPair
+	d := driver{run: execute, bin: o.herdr, timeout: o.timeout, prefix: o.prefix, timings: &timings}
+	report := runReport{Version: evidenceVersion, RunID: nonce(), Created: time.Now().UTC(), Agent: o.agent}
 	for _, bin := range []string{o.herdr, "container"} {
 		bounded, done := context.WithTimeout(ctx, o.timeout)
 		version, err := execute(bounded, bin, "--version")
@@ -73,26 +116,49 @@ func mainRun(args []string, out, errs io.Writer) int {
 			return 2
 		}
 		fmt.Fprintf(out, "%s: %s\n", bin, strings.TrimSpace(version))
+		if bin == o.herdr {
+			report.Herdr = strings.TrimSpace(version)
+		} else {
+			report.Container = strings.TrimSpace(version)
+		}
 	}
 	fmt.Fprintf(out, "UTC: %s; agent: %s; comparisons do not establish visual or lifecycle parity\n", time.Now().UTC().Format(time.RFC3339), o.agent)
 	if o.host == "" {
-		host, saint, err := d.open(ctx, o)
-		if host != "" {
-			fmt.Fprintf(out, "created host pane: %s (retained for inspection)\n", host)
+		for range o.runs {
+			host, saint, err := d.open(ctx, o)
+			if host != "" {
+				fmt.Fprintf(out, "created host pane: %s (retained for inspection)\n", host)
+			}
+			if saint != "" {
+				fmt.Fprintf(out, "created saint pane: %s (retained for inspection)\n", saint)
+			}
+			if err != nil {
+				fmt.Fprintln(errs, err)
+				return 2
+			}
+			o.host, o.saint = host, saint
 		}
-		if saint != "" {
-			fmt.Fprintf(out, "created saint pane: %s (retained for inspection)\n", saint)
-		}
-		if err != nil {
-			fmt.Fprintln(errs, err)
-			return 2
-		}
-		o.host, o.saint = host, saint
 	}
 	fmt.Fprintf(out, "host pane: %s; saint pane: %s\n", o.host, o.saint)
 	results := compareProbes(ctx, d, o.host, o.saint, defaultProbes())
 	for _, name := range manualProbes {
-		results = append(results, result{name: name, status: "NOT VERIFIED", detail: "requires observed Mac baseline"})
+		if name == "prompt latency p50/p95" {
+			results = append(results, timingResult(timings, o.maxRatio))
+		} else {
+			results = append(results, result{Name: name, Status: "NOT VERIFIED", Detail: "requires run-bound operator observation"})
+		}
+	}
+	report.Host, report.Saint, report.Results, report.Timings = o.host, o.saint, results, timings
+	if reportPath != "" {
+		if err := writeNewJSON(reportPath, report); err != nil {
+			fmt.Fprintln(errs, err)
+			return 2
+		}
+		if err := writeNewJSON(reportPath+".observations.json", templateFor(report)); err != nil {
+			fmt.Fprintln(errs, err)
+			return 2
+		}
+		fmt.Fprintf(out, "Saved run %s to %s; fill %s.observations.json and use -evaluate with -observations\n", report.RunID, reportPath, reportPath)
 	}
 	printResults(out, results)
 	if passing(results) != len(results) {
@@ -102,6 +168,12 @@ func mainRun(args []string, out, errs io.Writer) int {
 }
 
 func validateOptions(o options) error {
+	if o.runs < 1 || o.runs > 20 {
+		return errors.New("runs must be between 1 and 20")
+	}
+	if o.maxRatio < 1 || math.IsNaN(o.maxRatio) || math.IsInf(o.maxRatio, 0) {
+		return errors.New("max-startup-ratio must be finite and at least 1")
+	}
 	if o.timeout <= 0 {
 		return errors.New("timeout must be positive")
 	}
@@ -112,6 +184,9 @@ func validateOptions(o options) error {
 		return errors.New("provide both host-pane and saint-pane")
 	}
 	if o.host != "" {
+		if o.runs != 1 {
+			return errors.New("repeated startup timing requires newly opened panes")
+		}
 		if o.host == o.saint {
 			return errors.New("host and saint panes must differ")
 		}
