@@ -1,21 +1,30 @@
-FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5
+FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS download
+
+COPY runtime.lock /tmp/runtime.lock
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tmux \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupmod -n agent node \
-    && usermod -l agent -d /home/agent -m node \
-    && npm install -g @anthropic-ai/claude-code@2.1.247
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && . /tmp/runtime.lock \
+    && case "$(dpkg --print-architecture)" in \
+        arm64) arch=arm64; sha=$sha_arm64 ;; \
+        amd64) arch=x64; sha=$sha_amd64 ;; \
+        *) exit 1 ;; \
+    esac \
+    && curl -fsSL "https://registry.npmjs.org/@anthropic-ai/claude-code-linux-${arch}/-/claude-code-linux-${arch}-${version}.tgz" -o /tmp/claude.tgz \
+    && printf '%s  /tmp/claude.tgz\n' "$sha" | sha256sum -c - \
+    && mkdir -p /out \
+    && tar -xzf /tmp/claude.tgz -C /out --strip-components=1 package/claude
 
-# The version above is pinned on purpose, so the agent must not replace it at
-# runtime. DISABLE_UPDATES blocks every update path, not just the background
-# check: an agent that can fetch and execute new code inside its own sandbox is
-# a supply-chain route into the guest, and it silently undoes the pin.
-#
-# It also removes the "auto-update failed: no write permission to npm prefix"
-# error, which is the visible half of the same problem - the package is
-# installed by root and the agent runs as an unprivileged user, which is
-# exactly how it should be.
+FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl git openssh-client ripgrep less python3 tmux \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --shell /bin/bash agent
+
+COPY --from=download /out/claude /usr/local/bin/claude
+
+# The root-owned binary is pinned at build time.
 ENV DISABLE_UPDATES=1
 
 USER agent
