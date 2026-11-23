@@ -288,3 +288,49 @@ Gotchas:
 
 Not verified: `working` and `blocked` produced by a real authenticated agent
 through the wrapper.
+
+## Pane parity harness: baseline not recorded
+
+`make parity` drives host and saint panes with herdr send-text, send-keys,
+wait-output and read. Its CLI arguments follow the herdr 0.9.5 source.
+This harness has unit tests on Linux; it has not run against Apple container
+or live herdr panes. No Mac baseline, score, latency distribution or visual
+parity result has been recorded.
+
+On a Mac with Apple container, herdr, saint's plugin and an authenticated
+agent, open two dedicated idle agent panes in the same repository, then run:
+
+```sh
+make parity PARITY_ARGS='-host-pane w1:p2 -saint-pane w1:p3'
+```
+
+Or let the harness open dedicated panes beside a target. Supply an absolute
+repository path and literal text that identifies the agent's ready prompt:
+
+```sh
+make parity PARITY_ARGS='-target-pane w1:p1 -repo /path/to/repo -ready "ready prompt text"'
+```
+
+The default agent is Claude; choose `-agent codex` for Codex. The default shell
+prefix is `!`, so commands run through the agent's shell mode rather than
+being submitted as model prompts. Confirm the pinned agent supports this
+mode before running; use `-shell-prefix=""` only with dedicated shell panes.
+Do not target panes containing unsent input or ongoing work. New panes are
+retained for inspection even after failure; close them explicitly afterward.
+The harness does not push commits, change the clipboard or restart herdr.
+
+Each probe must produce uniquely framed output with exit status zero in both
+panes. Command echo cannot satisfy completion markers. Missing output,
+timeout, either-side failure or different output is a failure. The table
+prints no raw identity or configuration values. Config comparison is limited
+to selected non-credential settings, CLAUDE.md content and skill names; it does
+not establish that plugins/hooks ran or that credentials were excluded.
+
+Visual width, true color, resizing, extended keys, scrollback selection,
+clipboard, title/bell, authenticated fetch/push, effective plugins, prompt
+latency p50/p95, dialog count and close/restart/handoff are listed as
+NOT VERIFIED and kept in the score denominator. They still need observed Mac
+probes before this is a complete acceptance baseline. The command exits
+nonzero for any failed or unverified probe, and refuses to run on Linux.
+Record versions, per-probe results and those observations here when a real
+Mac run is available; do not substitute Linux unit-test results for it.
