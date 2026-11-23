@@ -114,6 +114,23 @@ func TestCreatePutsTheSessionOnItsOwnNetwork(t *testing.T) {
 	}
 }
 
+func TestCreateAllowsDanglingOptionalExclusion(t *testing.T) {
+	t.Parallel()
+
+	svc, sb, repo := newEgressService(t)
+	home := svc.Store.Paths().Home
+	if err := os.Symlink(filepath.Join(home, "missing"), filepath.Join(home, ".ssh")); err != nil {
+		t.Fatal(err)
+	}
+	created, err := svc.Create(t.Context(), CreateRequest{Repos: []sandbox.Repo{{Path: repo}}})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if created.ExperimentalProfile != "" || sb.proxyURL == "" {
+		t.Fatal("ordinary Create did not reach the sandbox")
+	}
+}
+
 // A container that fails to start leaves no network behind.
 func TestFailedCreateRemovesTheNetwork(t *testing.T) {
 	t.Parallel()

@@ -154,10 +154,10 @@ func (s *Service) normalizeRepoPath(raw string) (string, error) {
 	if resolved == string(filepath.Separator) {
 		return "", errors.New("repo path cannot be /")
 	}
-	if excludedMount(resolved, home, false) {
+	if excludedMount(resolved, home, false, false) {
 		return "", errors.New("repo path cannot be your home directory")
 	}
-	if excludedMount(resolved, s.Store.Paths().Root, true) {
+	if excludedMount(resolved, s.Store.Paths().Root, true, false) {
 		return "", errors.New("repo path cannot be inside ~/.saint")
 	}
 
@@ -166,13 +166,13 @@ func (s *Service) normalizeRepoPath(raw string) (string, error) {
 	// roots so the message says which of the two problems it is.
 	for _, name := range blockedHomeDirs {
 		sensitive := filepath.Join(home, name)
-		if excludedMount(resolved, sensitive, true) {
+		if excludedMount(resolved, sensitive, true, true) {
 			return "", fmt.Errorf("repo path %q holds credentials or tool state and cannot be mounted into a session", resolved)
 		}
 	}
 
 	for _, blocked := range blockedSystemRoots {
-		if excludedMount(resolved, blocked, true) {
+		if excludedMount(resolved, blocked, true, true) {
 			return "", fmt.Errorf("repo path %q is a system directory and cannot be mounted into a session", resolved)
 		}
 	}
@@ -186,17 +186,12 @@ func (s *Service) normalizeRepoPath(raw string) (string, error) {
 	return resolved, nil
 }
 
-// Missing optional exclusions are harmless; every other inspection failure
-// refuses the mount. Resolve intentional host aliases before identity checks.
-func excludedMount(path, root string, descendants bool) bool {
-	if _, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
-		return false
-	} else if err != nil {
-		return true
-	}
+// An optional exclusion has nothing to protect when its target is absent.
+// Resolve host aliases before comparing identities and deny inspection errors.
+func excludedMount(path, root string, descendants, optional bool) bool {
 	resolved, err := filepath.EvalSymlinks(root)
 	if err != nil {
-		return true
+		return !optional || !errors.Is(err, os.ErrNotExist)
 	}
 	if descendants {
 		return toolprofile.Overlaps(path, resolved)
