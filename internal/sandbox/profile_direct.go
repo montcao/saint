@@ -30,14 +30,21 @@ func (a *AppleContainer) runProfile(ctx context.Context, args ...string) ([]byte
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = 2 * time.Second
 	cmd.Env = profileEnvironment()
-	out := limitedProfileOutput{limit: 8 << 20}
+	out := limitedProfileOutput{limit: 8 << 20, cancel: func() {
+		cancel()
+		// A descendant may retain stdout after the command exits. Terminate
+		// the owned group even if CommandContext has already observed exit.
+		if cmd.Process != nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+	}}
 	cmd.Stdout = &out
 	// Inventory and error output can contain environment credentials. Do not
 	// echo it into diagnostics or debug logs, even on a failed command.
 	if err := cmd.Run(); err != nil {
 		return nil, nil, fmt.Errorf("experimental runtime command failed: %w", err)
 	}
-	return out.Bytes(), nil, nil
+	return out.buffer.Bytes(), nil, nil
 }
 
 func (a *AppleContainer) profileAttachCmd(ctx context.Context, name string) (*exec.Cmd, error) {
@@ -109,15 +116,19 @@ func ProfileGateway(ctx context.Context, containerPath, network string) (string,
 }
 
 type limitedProfileOutput struct {
-	bytes.Buffer
-	limit int
+	buffer bytes.Buffer
+	limit  int
+	cancel context.CancelFunc
 }
 
 func (b *limitedProfileOutput) Write(p []byte) (int, error) {
-	if len(p) > b.limit-b.Len() {
+	if len(p) > b.limit-b.buffer.Len() {
+		if b.cancel != nil {
+			b.cancel()
+		}
 		return 0, errors.New("experimental runtime response exceeds limit")
 	}
-	return b.Buffer.Write(p)
+	return b.buffer.Write(p)
 }
 func (a *AppleContainer) checkProfileCLI(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)

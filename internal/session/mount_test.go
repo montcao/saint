@@ -217,3 +217,26 @@ func TestFilesAndMissingPathsAreStillRefused(t *testing.T) {
 		t.Error("a path that does not exist was accepted")
 	}
 }
+
+func TestMountCaseInsensitiveAliases(t *testing.T) {
+	svc, home := newMountService(t, nil)
+	sensitive := filepath.Join(home, ".ssh")
+	if err := os.Mkdir(sensitive, 0700); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(home, ".SSH")
+	if _, err := os.Stat(alias); os.IsNotExist(err) {
+		t.Skip("requires case-insensitive filesystem")
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{alias, filepath.Join(home, ".SAINT")} {
+		if _, err := svc.normalizeRepoPath(path); err == nil {
+			t.Fatal("protected alias accepted")
+		}
+	}
+	project := gitRepo(t, filepath.Join(home, "Project"))
+	if _, err := svc.normalizeRepoPath(project); err != nil {
+		t.Fatal(err)
+	}
+}

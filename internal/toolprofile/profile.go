@@ -234,8 +234,55 @@ func Preflight(ctx context.Context, ref string) (Manifest, error) {
 	return m, Call(ctx, m.Adapter, "probe", nil)
 }
 
+// Contains compares filesystem identities along the inspected ancestor chain.
+// Paths must exist and contain no symlink components. Inspection failures are
+// returned to callers so allowlists and exclusions can both fail closed.
+func Contains(path, root string) (bool, error) {
+	chain, err := pathIdentities(path)
+	if err != nil {
+		return false, err
+	}
+	roots, err := pathIdentities(root)
+	if err != nil {
+		return false, err
+	}
+	for _, info := range chain {
+		if os.SameFile(info, roots[0]) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func pathIdentities(path string) ([]os.FileInfo, error) {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return nil, errors.New("path must be absolute and canonical")
+	}
+	var chain []os.FileInfo
+	for p := path; ; p = filepath.Dir(p) {
+		info, err := os.Lstat(p)
+		if err != nil {
+			return nil, err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || (p != path && !info.IsDir()) {
+			return nil, errors.New("unsafe path component")
+		}
+		chain = append(chain, info)
+		if filepath.Dir(p) == p {
+			return chain, nil
+		}
+	}
+}
+
+// Overlaps rejects either containment direction, including filesystem aliases.
+// An uninspectable path cannot be established as disjoint.
 func Overlaps(a, b string) bool {
-	return a == b || strings.HasPrefix(a, b+string(os.PathSeparator)) || strings.HasPrefix(b, a+string(os.PathSeparator))
+	ab, err := Contains(a, b)
+	if err != nil || ab {
+		return true
+	}
+	ba, err := Contains(b, a)
+	return err != nil || ba
 }
 
 // Stop hashing between reads when the enclosing pane operation is canceled.
