@@ -189,7 +189,7 @@ func (a *AppleContainer) List(ctx context.Context) ([]Info, error) {
 }
 
 func (a *AppleContainer) Stop(ctx context.Context, name string) error {
-	if _, err := a.profileOperation(ctx, name, "check"); err != nil {
+	if handled, err := a.profileOperation(ctx, name, "stop"); handled || err != nil {
 		return err
 	}
 
@@ -201,18 +201,10 @@ func (a *AppleContainer) Stop(ctx context.Context, name string) error {
 }
 
 func (a *AppleContainer) Start(ctx context.Context, name string) error {
-	if handled, err := a.profileOperation(ctx, name, "check"); err != nil {
+	if r, err := a.profileRecord(name); err != nil {
 		return err
-	} else if handled {
-		inventory, err := a.List(ctx)
-		if err != nil {
-			return err
-		}
-		for _, vm := range inventory {
-			if vm.Name == name && vm.State == StateRunning {
-				return nil
-			}
-		}
+	} else if r != nil {
+		return errors.New("experimental sessions require an attached pane; use saint attach")
 	}
 
 	if err := ValidateContainerName(name); err != nil {
@@ -245,9 +237,15 @@ const (
 )
 
 func (a *AppleContainer) AttachCmd(name string, opts AttachOptions) (*exec.Cmd, error) {
-	if _, err := a.profileOperation(context.Background(), name, "check"); err != nil {
-		return nil, err
+	if opts.DirectContext != nil {
+		return a.profileAttachCmd(opts.DirectContext, name)
 	}
+	if r, err := a.profileRecord(name); err != nil {
+		return nil, err
+	} else if r != nil {
+		return nil, errors.New("experimental sessions require direct attachment")
+	}
+
 	if err := ValidateContainerName(name); err != nil {
 		return nil, fmt.Errorf("attach: %w", err)
 	}
@@ -333,6 +331,9 @@ const (
 )
 
 func runtimeBootstrapScript(rt Runtime, workdir string, opts CreateOptions) (string, error) {
+	if opts.ExperimentalProfile != "" {
+		return profileBootstrapScript(rt, workdir, opts)
+	}
 	// Deliberately `set -u` and not `set -eu`.
 	//
 	// This script is the container's init: when it exits, the container stops.

@@ -246,10 +246,12 @@ func reattach(ctx context.Context, deps sessionDeps, ref string, out io.Writer) 
 		return err
 	}
 	printBilling(out, found)
-	// Start fails for a session that is already running, which is fine.
-	if err := deps.svc.Start(ctx, found.ID); err != nil && found.ExperimentalProfile != "" {
-		return err
+	if found.ExperimentalProfile != "" {
+		printDirectLifetime(out)
+		return attachDirect(ctx, deps, found, nil, out)
 	}
+	// Start fails for a session that is already running, which is fine.
+	_ = deps.svc.Start(ctx, found.ID)
 	if err := serveSession(ctx, deps, found.ID); err != nil {
 		return err
 	}
@@ -260,6 +262,10 @@ func reattach(ctx context.Context, deps sessionDeps, ref string, out io.Writer) 
 // in for as long as the attach lasts, so the proxy knows where to ask about a
 // host for it.
 func attachHere(deps sessionDeps, sessionID string) error {
+	return withHerdrPane(deps, sessionID, func() error { return execAttach(deps.svc.AttachCmd(sessionID)) })
+}
+
+func withHerdrPane(deps sessionDeps, sessionID string, run func() error) error {
 	var pane *store.HerdrPane
 	if deps.pane != nil {
 		pane = deps.pane()
@@ -278,7 +284,7 @@ func attachHere(deps sessionDeps, sessionID string) error {
 			})
 		}()
 	}
-	return execAttach(deps.svc.AttachCmd(sessionID))
+	return run()
 }
 
 // currentHerdrPane is the herdr pane this process runs in, from the variables
@@ -313,8 +319,10 @@ func startAndAttach(ctx context.Context, deps sessionDeps, in *prompter, out io.
 			return err
 		}
 	}
-	if _, err := ensureService(ctx, deps, in, out); err != nil {
-		return err
+	if req.ExperimentalProfile == "" {
+		if _, err := ensureService(ctx, deps, in, out); err != nil {
+			return err
+		}
 	}
 
 	rt := req.Runtime
@@ -326,10 +334,24 @@ func startAndAttach(ctx context.Context, deps sessionDeps, in *prompter, out io.
 			return err
 		}
 	}
+	if req.ExperimentalProfile != "" {
+		if err := deps.ensureProxy(ctx); err != nil {
+			return err
+		}
+		if err := requireProfileProxy(ctx, deps); err != nil {
+			return err
+		}
+	}
 	fmt.Fprintf(out, "saint: starting a %s microVM on its own network\n", rt)
 	created, err := deps.svc.Create(ctx, req)
 	if err != nil {
 		return err
+	}
+
+	if created.ExperimentalProfile != "" {
+		printBilling(out, created)
+		printDirectLifetime(out)
+		return attachDirect(ctx, deps, created, in, out)
 	}
 
 	// The proxy listens after the container starts, not before: the

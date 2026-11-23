@@ -41,6 +41,9 @@ func (a *AppleContainer) PreflightProfile(ctx context.Context, ref string) error
 	if a.profileRoot == "" {
 		return errors.New("experimental profile state is not configured")
 	}
+	if err := a.checkProfileCLI(ctx); err != nil {
+		return err
+	}
 	_, err := toolprofile.Preflight(ctx, ref)
 	return err
 }
@@ -167,8 +170,7 @@ func (a *AppleContainer) createProfile(ctx context.Context, name string, rt Runt
 	if err = toolprofile.Call(ctx, m.Adapter, "create", r); err != nil {
 		return err
 	}
-	_, _, err = a.run(ctx, "start", name)
-	return err
+	return nil
 }
 
 // ReserveProfile creates durable identity before any network or VM mutation.
@@ -180,7 +182,11 @@ func (a *AppleContainer) ReserveProfile(ctx context.Context, name, ref string) e
 	if err != nil {
 		return err
 	}
-	inventory, err := a.List(ctx)
+	stdout, _, err := a.runProfile(ctx, "ls", "--all", "--format", "json")
+	if err != nil {
+		return err
+	}
+	inventory, err := ParseListJSON(stdout)
 	if err != nil {
 		return err
 	}
@@ -189,7 +195,7 @@ func (a *AppleContainer) ReserveProfile(ctx context.Context, name, ref string) e
 			return errors.New("container name already exists")
 		}
 	}
-	data, _, err := a.run(ctx, "network", "ls", "--format", "json")
+	data, _, err := a.runProfile(ctx, "network", "ls", "--format", "json")
 	if err != nil {
 		return err
 	}

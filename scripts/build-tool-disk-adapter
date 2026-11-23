@@ -1,6 +1,8 @@
 #!/bin/sh
 # Build only: never install or restart Apple's runtime.
 set -eu
+mode=build
+if [ "${1:-}" = --test ]; then mode=test; shift; fi
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 output=${1:-"$repo/dist/ToolDiskAdapter"}
 case "$output" in /*) ;; *) echo 'output must be absolute' >&2; exit 2;; esac
@@ -22,10 +24,29 @@ for item in source.iterdir():
 PY
 export SWIFTPM_CUSTOM_LIBS_DIR="$scratch/swiftpm-libs"
 export CLANG_MODULE_CACHE_PATH="$scratch/module-cache"
-swift build --package-path "$repo/tools/tool-disk-adapter" \
+set -- --package-path "$repo/tools/tool-disk-adapter" \
     --scratch-path "$scratch/build" --cache-path "$scratch/cache" \
     --config-path "$scratch/config" --security-path "$scratch/security" \
     --force-resolved-versions -j 4
+if [ "$mode" = test ]; then
+    set -- "$@" --disable-xctest --enable-swift-testing
+    # CLT packages Swift Testing outside the default framework/library paths.
+    # Discover the active developer directory; do not change SDK configuration.
+    developer=$(xcode-select -p)
+    frameworks="$developer/Library/Developer/Frameworks"
+    interop="$developer/Library/Developer/usr/lib"
+    if [ -d "$frameworks/Testing.framework" ]; then
+        set -- "$@" -Xswiftc -F -Xswiftc "$frameworks" \
+            -Xlinker -F -Xlinker "$frameworks" \
+            -Xlinker -rpath -Xlinker "$frameworks"
+        if [ -f "$interop/lib_TestingInterop.dylib" ]; then
+            set -- "$@" -Xlinker -rpath -Xlinker "$interop"
+        fi
+    fi
+    swift test "$@"
+    exit
+fi
+swift build "$@"
 mkdir -p -- "$(dirname -- "$output")"
 install -m 0700 "$scratch/build/debug/ToolDiskAdapter" "$output"
 shasum -a 256 "$output"

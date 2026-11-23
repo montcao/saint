@@ -1,0 +1,4 @@
+# Pinned native artifact also used by the direct-pane work in PR #38.
+# Refresh this pin and the Debian snapshot together during qualification.
+version=2.1.247
+sha_arm64=43384995766bbc35c7b9f5e034d3b010be20d3c4d70b69a1c7cc4fe29caee54b

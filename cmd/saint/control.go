@@ -28,9 +28,10 @@ import (
 // JSON object per line in each direction.
 
 const (
-	controlOpPing   = "ping"
-	controlOpListen = "listen"
-	controlOpEgress = "egress"
+	controlOpPing          = "ping"
+	controlOpListen        = "listen"
+	controlOpProfileListen = "listen-profile-v1"
+	controlOpEgress        = "egress"
 
 	// controlTimeout bounds a ping or listen exchange. Listening can wait for a
 	// session's gateway to come up, which takes under a second when measured.
@@ -50,8 +51,9 @@ type controlRequest struct {
 }
 
 type controlResponse struct {
-	OK    bool   `json:"ok"`
-	Error string `json:"error,omitempty"`
+	ProfileV1 bool   `json:"profile_v1,omitempty"`
+	OK        bool   `json:"ok"`
+	Error     string `json:"error,omitempty"`
 
 	// ping
 	PID       int      `json:"pid,omitempty"`
@@ -171,12 +173,12 @@ func handleControl(conn net.Conn, h controlHandlers, logf func(string, ...any)) 
 
 	switch req.Op {
 	case controlOpPing:
-		resp := controlResponse{OK: true, PID: os.Getpid()}
+		resp := controlResponse{OK: true, PID: os.Getpid(), ProfileV1: true}
 		if h.listeners != nil {
 			resp.Listeners = h.listeners()
 		}
 		_ = c.send(resp)
-	case controlOpListen:
+	case controlOpListen, controlOpProfileListen:
 		if h.listen == nil {
 			_ = c.send(controlResponse{Error: "this proxy does not serve sessions"})
 			return

@@ -70,3 +70,9 @@ coverage.*
 /docs/research/tool-profile/results.md
 /docs/research/tool-profile/herdr-gate-macos.json
 /docs/research/tool-profile/validation.txt
+
+# Developer tool-profile outputs are private, never source artifacts.
+*.erofs
+*.ext4
+*.dmg
+**/__pycache__/

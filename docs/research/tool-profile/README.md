@@ -11,13 +11,25 @@ is not release-qualified, and does not ship bootable profiles or binary disks.
 
 ## Implementation status under #39
 
-The profile handoff, adapter and ownership checks are implemented. The prototype
-still uses the existing tmux bootstrap: closing a pane detaches, and `saint stop`
-stops its VM. This **does not satisfy #39's direct-pane lifecycle requirement**.
-Coordinate direct attached starts, readiness markers and activity panes with
-[#38](https://github.com/montcao/saint/pull/38). Complete tool-profile build recipes,
-positive agent/tool execution, terminal parity and concurrent-pane acceptance
-also remain #39 work, rather than qualification-only follow-ups.
+The experimental path uses a direct attached start: closing the pane or exiting
+its agent stops that session's VM. Reopening starts the agent again in its retained
+private root; the initial prompt is claimed once. Ordinary sessions retain their
+existing launch path. This integration reuses the direct-start approach in
+[#38](https://github.com/montcao/saint/pull/38) without enabling it globally.
+
+A per-session host lock serializes create, attachment and deletion. The pane
+restores terminal state, reaps its CLI child, and performs bounded ownership-checked
+stop after cancellation, startup failure or agent exit. An older running Saint
+proxy fails the capability gate before VM creation. It is never restarted
+implicitly. Use an isolated `SAINT_HOME` for developer tests or update the proxy
+only after coordinating its other sessions.
+
+The [developer recipe](../../../tools/tool-profile/README.md) builds a matched
+ARM64 baseline and raw EROFS/journaled ext4 artifacts, wraps the raw tool disk in
+ULFO, and generates manifests bound to the exact build receipt. Code and synthetic
+checks are present; actual Linux image builds, positive VM/tool execution and
+interactive terminal/concurrent-pane acceptance remain live gates under #40.
+Do not close #39 on synthetic evidence alone.
 
 ## Selecting a profile
 
@@ -75,7 +87,7 @@ Publisher provenance and release signing remain gates below.
 
 The private root template must include the non-root `agent` account (uid/gid
 1000), `/home/agent`, mountpoints, merged-/usr symlinks and configuration matching
-the tools. `/usr` must contain Claude, tmux, shell, Git, SSH client, ripgrep,
+the tools. `/usr` must contain Claude, Bash, Git, SSH client, ripgrep,
 Python and required libraries/stdlib, curl, less and certificates. Each session
 gets a distinct copied/cloned inode at `tool-profiles/<container>/root.ext4`.
 Full content hashing is intentional; the older host-specific sparse receipt is
@@ -95,23 +107,38 @@ An exclusive directory reservation and random 256-bit owner nonce precede any
 network/VM mutation. The durable pending session is discoverable even when
 creation fails. VM labels bind the owner and manifest; network labels bind the
 same owner. All manifests, disks and ownership records must be outside every
-share requested by that session. No SSH forwarding is enabled and the helper
+share requested by that session. Imported and project/user MCP servers are disabled for this experimental path.
+SSH forwarding is unsupported in this profile; no signing authority is passed.
+The helper
 receives a minimal host environment, without provider keys or runtime overrides.
 
-Every helper mutation holds a nonblocking per-session lock. Removal verifies VM
+Every helper mutation holds a nonblocking per-session lock. The pane owns a
+separate durable lock across its full lifecycle, also taken by create and delete.
+Both helper and experimental CLI receive minimal environments, and the CLI and
+daemon must match the pinned revision. Unstructured helper stderr is not echoed
+into panes or logs. Stop checks ownership without requiring intact tool artifacts. Removal verifies VM
 labels, stops and deletes exactly that VM, confirms its absence, normally
 detaches only the matching owned ULFO volume, and removes only known private
 files. It never force-detaches, prunes, deletes shared images/snapshots, or runs
 global content GC. Network ownership is rechecked before network deletion.
 Session metadata is removed last. An error retains state for an explicit
 `saint rm <id>` retry; ownership failures never fall back to legacy deletion.
-Creation rollback uses a fresh bounded context after cancellation. A small
+Failed experimental creation retains its pending session and resources rather
+than assuming a canceled helper stopped an in-flight daemon request.
+An interrupted attached start can leave daemon work in flight after the client
+exits. A durable pending marker prevents reattachment and disk deletion when
+completion cannot be established, including a nonzero CLI exit whose cause may
+be an agent failure or a runtime transport failure. The exit code is preserved. Ownership-checked stop remains available;
+retained resources require qualified recovery under #40. Do not delete the marker
+merely because one runtime inventory snapshot says stopped. A small
 ownership tombstone is retained after successful cleanup, with launch commands,
 mounts and session-token environment scrubbed. Artifact templates are not owned
 by a session and are never removed by session cleanup.
 
 A user-owned host process can still change its own trusted artifacts. This is
-not a security boundary against a malicious host user. Root/mount crash recovery,
+not a security boundary against a malicious host user. The snapshot API does not expose the root filesystem override; a private
+device/inode receipt detects replacement but is not proof of the daemon binding.
+Root/mount crash recovery,
 other-session interference and power-loss durability require positive testing;
 file and directory synchronization does not establish a power-loss guarantee.
 
@@ -151,6 +178,8 @@ make check
 make vulncheck
 make docs-check
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_tool_profile_privacy.py
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_tool_profile_build.py
+scripts/build-tool-disk-adapter --test
 scripts/build-tool-disk-adapter /absolute/private/ToolDiskAdapter
 python3 scripts/test-tool-profile-gate.py \
   --saint /absolute/saint --adapter /absolute/private/ToolDiskAdapter \

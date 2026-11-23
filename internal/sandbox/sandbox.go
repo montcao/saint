@@ -115,6 +115,7 @@ type CreateOptions struct {
 
 // AttachOptions tells attach how to rebuild a session that is no longer there.
 type AttachOptions struct {
+	DirectContext context.Context
 	// Workdir is where a recreated session starts.
 	Workdir string
 	// Command is the agent to run when the session had to be recreated. Empty

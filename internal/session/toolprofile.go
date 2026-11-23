@@ -24,10 +24,19 @@ func (s *Service) PreflightProfile(ctx context.Context, ref string) error {
 }
 
 func (s *Service) requireProfile(id string) error {
-	found, err := s.Find(id)
+	sessions, err := s.Store.LoadSessions()
 	if err != nil {
-		return nil
-	} // Preserve the legacy path for unrecorded names.
+		return err
+	}
+	var found store.Session
+	for _, candidate := range sessions {
+		if candidate.ID == id {
+			found = candidate
+			break
+		}
+	}
+	// Unrecorded legacy names retain their existing sandbox validation. A corrupt
+	// state file must never turn a recorded profile into a legacy operation.
 	if found.ExperimentalProfile == "" {
 		return nil
 	}

@@ -46,7 +46,7 @@ func requireSystemBinary(path string) error {
 func main() {
 	if err := run(context.Background(), os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		os.Exit(commandExitStatus(err))
 	}
 }
 

@@ -11,5 +11,5 @@ let package = Package(
         .product(name: "ContainerAPIClient", package: "container"),
         .product(name: "ContainerResource", package: "container"),
         .product(name: "Containerization", package: "containerization"),
-    ])]
+    ]), .testTarget(name: "ToolDiskAdapterTests", dependencies: ["ToolDiskAdapter"])]
 )

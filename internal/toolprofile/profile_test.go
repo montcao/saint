@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testArtifact(t *testing.T, dir, name, contents string) Artifact {
@@ -105,5 +106,50 @@ func TestProfileRefRequiresExplicitDigest(t *testing.T) {
 		if _, _, err := ParseRef(ref); err == nil {
 			t.Fatalf("accepted %q", ref)
 		}
+	}
+}
+
+func TestCallDoesNotExposeHelperDiagnostics(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := testArtifact(t, dir, "helper", "#!/bin/sh\nprintf 'synthetic-private-credential' >&2\nexit 1\n")
+	if err = os.Chmod(a.Path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	err = Call(context.Background(), a, "probe", nil)
+	if err == nil || strings.Contains(err.Error(), "synthetic-private-credential") {
+		t.Fatalf("diagnostics boundary failed: %v", err)
+	}
+}
+
+func TestCallBoundsInputAndRejectsUnknownOperations(t *testing.T) {
+	_, m := testProfile(t)
+	if err := Call(context.Background(), m.Adapter, "create", strings.Repeat("x", 262145)); err == nil {
+		t.Fatal("oversized request accepted")
+	}
+	if err := Call(context.Background(), m.Adapter, "unrecognized", nil); err == nil {
+		t.Fatal("unknown operation accepted")
+	}
+}
+
+func TestCallCancellationBoundsDescendantWait(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := testArtifact(t, dir, "helper", "#!/bin/sh\n/bin/sleep 30 &\nwait\n")
+	if err = os.Chmod(a.Path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	if err = Call(ctx, a, "probe", nil); err == nil {
+		t.Fatal("canceled helper succeeded")
+	}
+	if time.Since(started) > 5*time.Second {
+		t.Fatal("descendant held helper pipes open")
 	}
 }

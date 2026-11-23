@@ -59,7 +59,10 @@ func (r *recordingSandbox) AttachCmd(string, sandbox.AttachOptions) (*exec.Cmd, 
 
 func newEgressService(t *testing.T) (*Service, *recordingSandbox, string) {
 	t.Helper()
-	home := t.TempDir()
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	st := store.New(home)
 	if _, err := st.EnsureConfig(); err != nil {
 		t.Fatalf("EnsureConfig() error = %v", err)

@@ -29,7 +29,7 @@ func profileFixture(t *testing.T) (*AppleContainer, string, string) {
 		return toolprofile.Artifact{Path: p, SHA256: hex.EncodeToString(h[:])}
 	}
 	adapter := artifact("adapter", "#!/bin/sh\n[ \"$1\" != remove ] || exit 19\nexit 0\n", 0o700)
-	cli := artifact("container", "#!/bin/sh\nprintf '[]\\n'\n", 0o700)
+	cli := artifact("container", "#!/bin/sh\nif [ \"$1\" = --version ]; then echo "+toolprofile.RuntimeCommit+"; else printf '[]\\n'; fi\n", 0o700)
 	tools := artifact("tools", "tools", 0o600)
 	d := "sha256:" + strings.Repeat("1", 64)
 	m := toolprofile.Manifest{Schema: 1, RuntimeCommit: toolprofile.RuntimeCommit, Format: "erofs", Adapter: adapter, Tools: tools, ToolSHA256: tools.SHA256, Root: artifact("root", "root", 0o600), Kernel: artifact("kernel", "kernel", 0o600), Review: artifact("review", "test only", 0o600), ImageReference: "example.invalid/image@" + d, ImageDigest: d, InitReference: "example.invalid/init@" + d, InitDigest: d}

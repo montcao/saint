@@ -164,9 +164,17 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (store.Session,
 		if err := s.Sandbox.(profileSandbox).ReserveProfile(ctx, containerName(id), req.ExperimentalProfile); err != nil {
 			return store.Session{}, err
 		}
+		lease, err := s.LockProfile(id)
+		if err != nil {
+			return store.Session{}, err
+		}
+		defer lease.Close()
 		// Persist a discoverable pending session before external side effects.
 		session.Network = networkName(id)
 		if err := s.Store.AddSession(session); err != nil {
+			return store.Session{}, err
+		}
+		if err := s.MarkProfilePending(session.ID); err != nil {
 			return store.Session{}, err
 		}
 	}
@@ -197,7 +205,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (store.Session,
 		if req.ExperimentalProfile != "" {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			if err := s.Delete(cleanupCtx, session.ID); err != nil && s.Logf != nil {
+			if err := s.deleteProfile(cleanupCtx, session); err != nil && s.Logf != nil {
 				s.Logf("experimental cleanup retained %s: %v", session.ID, err)
 			}
 			return
@@ -243,11 +251,17 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (store.Session,
 		ClaudeTelemetryOff:  cfg.ClaudeTelemetryOff,
 	}
 	if err := s.Sandbox.Create(ctx, containerName(session.ID), session.Runtime, session.Repos, sessionDir, proxyURL, createOpts); err != nil {
+		if req.ExperimentalProfile != "" {
+			return store.Session{}, fmt.Errorf("experimental creation incomplete; session %s and owned resources retained pending qualified recovery: %w", session.ID, err)
+		}
 		discard()
 		return store.Session{}, err
 	}
 
 	if req.ExperimentalProfile != "" {
+		if err := s.ClearProfilePending(session.ID); err != nil {
+			return store.Session{}, err
+		}
 		err = s.Store.UpdateSession(session.ID, func(saved *store.Session) { *saved = session })
 	} else {
 		err = s.Store.AddSession(session)
@@ -296,6 +310,14 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 		return err
 	}
 	if found, err := s.Find(id); err == nil && found.ExperimentalProfile != "" {
+		lease, err := s.LockProfile(id)
+		if err != nil {
+			return err
+		}
+		defer lease.Close()
+		if err := s.RequireProfileQuiescent(id); err != nil {
+			return err
+		}
 		return s.deleteProfile(ctx, found)
 	}
 	_ = s.Sandbox.Remove(ctx, containerName(id))

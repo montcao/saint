@@ -123,15 +123,19 @@ func (a *AppleContainer) CreateNetwork(ctx context.Context, name string) (string
 	if err := ValidateContainerName(name); err != nil {
 		return "", fmt.Errorf("create network: %w", err)
 	}
-	stdout, _, err := a.run(ctx, "network", "ls", "--format", "json")
+	record, err := a.profileRecord(name)
+	if err != nil {
+		return "", err
+	}
+	run := a.run
+	if record != nil {
+		run = a.runProfile
+	}
+	stdout, _, err := run(ctx, "network", "ls", "--format", "json")
 	if err != nil {
 		return "", fmt.Errorf("list container networks: %w", err)
 	}
 	exists, err := networkExists(stdout, name)
-	if err != nil {
-		return "", err
-	}
-	record, err := a.profileRecord(name)
 	if err != nil {
 		return "", err
 	}
@@ -144,10 +148,10 @@ func (a *AppleContainer) CreateNetwork(ctx context.Context, name string) (string
 			args = append(args, "--label", "saint.profile.owner="+record.Owner)
 		}
 		args = append(args, name)
-		if _, _, err := a.run(ctx, args...); err != nil {
+		if _, _, err := run(ctx, args...); err != nil {
 			return "", fmt.Errorf("create network %s: %w", name, err)
 		}
-		if stdout, _, err = a.run(ctx, "network", "ls", "--format", "json"); err != nil {
+		if stdout, _, err = run(ctx, "network", "ls", "--format", "json"); err != nil {
 			return "", fmt.Errorf("list container networks: %w", err)
 		}
 	}
@@ -162,16 +166,20 @@ func (a *AppleContainer) RemoveNetwork(ctx context.Context, name string) error {
 	if err := ValidateContainerName(name); err != nil {
 		return fmt.Errorf("remove network: %w", err)
 	}
-	stdout, _, err := a.run(ctx, "network", "ls", "--format", "json")
+	record, err := a.profileRecord(name)
+	if err != nil {
+		return err
+	}
+	run := a.run
+	if record != nil {
+		run = a.runProfile
+	}
+	stdout, _, err := run(ctx, "network", "ls", "--format", "json")
 	if err != nil {
 		return fmt.Errorf("list container networks: %w", err)
 	}
 	exists, err := networkExists(stdout, name)
 	if err != nil || !exists {
-		return err
-	}
-	record, err := a.profileRecord(name)
-	if err != nil {
 		return err
 	}
 	if record != nil {
@@ -185,7 +193,7 @@ func (a *AppleContainer) RemoveNetwork(ctx context.Context, name string) error {
 			}
 		}
 	}
-	if _, _, err := a.run(ctx, "network", "delete", name); err != nil {
+	if _, _, err := run(ctx, "network", "delete", name); err != nil {
 		return fmt.Errorf("delete network %s: %w", name, err)
 	}
 	return nil

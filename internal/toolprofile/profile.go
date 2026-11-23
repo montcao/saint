@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 )
 
 const RuntimeCommit = "a15b46097aa4c2325da13c1fb5192b9274aab083"
@@ -88,20 +89,45 @@ func PrivatePath(path string, directory bool) error {
 	return nil
 }
 
-func Verify(a Artifact) error {
+// openArtifact binds validation to the descriptor that will actually be read.
+// Private host ownership remains the trust boundary; guest shares must not overlap.
+func openArtifact(a Artifact) (*os.File, error) {
 	if !digestValid(a.SHA256) {
-		return errors.New("invalid artifact SHA256")
+		return nil, errors.New("invalid artifact SHA256")
 	}
 	if err := PrivatePath(a.Path, false); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(a.Path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, err
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok || !fi.Mode().IsRegular() || int(st.Uid) != os.Getuid() || st.Nlink != 1 || fi.Mode().Perm()&0o077 != 0 {
+		f.Close()
+		return nil, errors.New("opened artifact is not private and exclusive")
+	}
+	return f, nil
+}
+
+func Verify(a Artifact) error { return verifyContext(context.Background(), a) }
+
+func verifyContext(ctx context.Context, a Artifact) error {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	f, err := os.Open(a.Path)
+	f, err := openArtifact(a)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 	h := sha256.New()
-	if _, err = io.Copy(h, f); err != nil {
+	if _, err = io.Copy(h, contextReader{ctx, f}); err != nil {
 		return err
 	}
 	if hex.EncodeToString(h.Sum(nil)) != a.SHA256 {
@@ -110,21 +136,32 @@ func Verify(a Artifact) error {
 	return nil
 }
 
-func Load(ref string) (Manifest, error) {
+func Load(ref string) (Manifest, error) { return loadContext(context.Background(), ref) }
+
+func loadContext(ctx context.Context, ref string) (Manifest, error) {
 	var m Manifest
 	p, h, err := ParseRef(ref)
 	if err != nil {
 		return m, err
 	}
-	if err = Verify(Artifact{p, h}); err != nil {
-		return m, err
-	}
-	f, err := os.Open(p)
+	f, err := openArtifact(Artifact{p, h})
 	if err != nil {
 		return m, err
 	}
 	defer f.Close()
-	dec := json.NewDecoder(io.LimitReader(f, 65537))
+	data, err := io.ReadAll(io.LimitReader(f, 65537))
+	if err != nil {
+		return m, err
+	}
+	if len(data) > 65536 {
+		return m, errors.New("manifest exceeds limit")
+	}
+	sum := sha256.Sum256(data)
+	if hex.EncodeToString(sum[:]) != h {
+		return m, errors.New("manifest digest mismatch")
+	}
+	// Parse the very bytes whose digest was checked, never reopen the pathname.
+	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err = dec.Decode(&m); err != nil {
 		return m, err
@@ -142,7 +179,7 @@ func Load(ref string) (Manifest, error) {
 		}
 	}
 	for _, a := range []Artifact{m.Adapter, m.Tools, m.Root, m.Kernel, m.Review} {
-		if err = Verify(a); err != nil {
+		if err = verifyContext(ctx, a); err != nil {
 			return m, err
 		}
 	}
@@ -155,26 +192,42 @@ func Load(ref string) (Manifest, error) {
 // Call passes only explicit input and a minimal environment to the verified
 // helper. Provider credentials, SSH_AUTH_SOCK and CONTAINER_* overrides are absent.
 func Call(ctx context.Context, adapter Artifact, op string, input any) error {
-	if err := Verify(adapter); err != nil {
+	switch op {
+	case "probe", "create", "check", "stop", "remove":
+	default:
+		return errors.New("unsupported experimental adapter operation")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	if err := verifyContext(ctx, adapter); err != nil {
 		return err
 	}
 	data, err := json.Marshal(input)
 	if err != nil {
 		return err
 	}
+	if len(data) > 262144 {
+		return errors.New("experimental adapter request exceeds limit")
+	}
 	cmd := exec.CommandContext(ctx, adapter.Path, op)
+	// hdiutil is an adapter child. Cancel the owned process group as well so a
+	// canceled helper cannot leave a late mount mutation after cleanup begins.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = 2 * time.Second
 	cmd.Env = []string{"PATH=/usr/bin:/bin:/usr/sbin:/sbin", "HOME=" + os.Getenv("HOME")}
 	cmd.Stdin = bytes.NewReader(data)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	// Runtime errors can include request bodies or configuration. Never propagate
+	// unstructured helper diagnostics to panes, logs or chat transcripts.
+	cmd.Stderr = io.Discard
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("experimental adapter %s: %w: %s", op, err, stderr.String())
+		return fmt.Errorf("experimental adapter %s failed (verify pinned runtime, ownership and reviewed artifacts): %w", op, err)
 	}
 	return nil
 }
 
 func Preflight(ctx context.Context, ref string) (Manifest, error) {
-	m, err := Load(ref)
+	m, err := loadContext(ctx, ref)
 	if err != nil {
 		return m, err
 	}
@@ -183,4 +236,17 @@ func Preflight(ctx context.Context, ref string) (Manifest, error) {
 
 func Overlaps(a, b string) bool {
 	return a == b || strings.HasPrefix(a, b+string(os.PathSeparator)) || strings.HasPrefix(b, a+string(os.PathSeparator))
+}
+
+// Stop hashing between reads when the enclosing pane operation is canceled.
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p)
 }

@@ -148,7 +148,8 @@ def main():
             output = json.loads(call(['pane', 'wait-output', pane, '--match',
                                       'Press Enter to close this pane.', '--timeout', '15000',
                                       '--source', 'recent-unwrapped']).stdout)['result']['read']['text']
-            assert 'Requires pinned API server' in output, output
+            assert ('requires the pinned Apple container CLI' in output or
+                    'experimental adapter probe failed' in output), 'expected unsupported-runtime gate'
             assert {source, pane}.issubset({p['pane_id'] for p in panes(workspace)})
             # A neighboring owned shell remains usable while the failed pane waits.
             marker = 'SAINT_NEIGHBOR_'+str(attempt)
