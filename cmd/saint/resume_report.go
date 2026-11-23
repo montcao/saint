@@ -11,7 +11,7 @@ import (
 )
 
 func resumeReportArgs(paneID, runtime, executable, stateDir, sessionID string) []string {
-	return []string{"pane", "report-agent", paneID, "--source", "saint-resume", "--agent", runtime,
+	return []string{"pane", "report-agent", paneID, "--source", "saint-resume", "--agent", runtime, "--state", "unknown",
 		"--", "env", store.StateDirEnv + "=" + stateDir, executable, "attach", sessionID}
 }
 
