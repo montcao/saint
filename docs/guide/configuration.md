@@ -236,6 +236,22 @@ data to an account of its own.
 
 ## Sessions
 
+### Pane lifetime and conversation resume
+
+New sessions run the agent directly in the guest terminal, without tmux.
+Closing the pane, quitting the agent or restarting herdr may end the agent.
+The guest filesystem and conversation history are kept. Reopening uses
+Claude Code `--continue` or Codex `resume --last`, and does not repeat the
+initial prompt. An attached start restarts the stopped container.
+
+saint reports a reattach command through herdr's report-agent interface.
+Whether herdr restores plugin-reported commands has not been verified on a
+Mac. If a restart leaves a plain shell, run `saint attach <session>` there.
+Resize, scrollback, pane-close and restart behavior remain unverified.
+Existing tmux sessions retain their legacy attach path; new direct sessions
+produce no tmux transcript. A session with no saved conversation yet cannot
+promise a conversation to resume.
+
 ### What a session can see
 
 A guest can read and write every directory mounted into it, so what gets

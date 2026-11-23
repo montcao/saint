@@ -279,6 +279,7 @@ func (s *Service) RenewCredential(ctx context.Context, id string) (store.Session
 	_ = os.Remove(filepath.Join(sessionDir, sandbox.ProxyReadyFile))
 
 	createOpts := sandbox.CreateOptions{
+		Direct:             true,
 		CPUs:               session.CPUs,
 		MemoryGB:           session.MemoryGB,
 		Name:               session.Name,
@@ -305,6 +306,7 @@ func (s *Service) RenewCredential(ctx context.Context, id string) (store.Session
 		stored.CredentialExpiresAt = session.CredentialExpiresAt
 		stored.LastRunAt = session.LastRunAt
 		stored.Network = session.Network
+		stored.Direct = true
 		session = *stored
 	}); err != nil {
 		return store.Session{}, err

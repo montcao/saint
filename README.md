@@ -80,9 +80,11 @@ description = "sandboxed agent"
 - **Answer network questions:** a small pane opens below the blocked session,
   without taking your focus. Go to it and press `a` to allow the host for every
   session, or `d` to refuse this request. No answer within 2 minutes refuses.
-- **Close and come back:** closing the pane leaves the agent running.
-  `saint attach <session>` in any herdr pane reconnects, and network questions
-  follow it there. `saint ls` lists sessions.
+- **Close and come back:** closing a new pane or restarting herdr may end
+  the agent. `saint attach <session>` restarts the stopped guest and continues
+  the last conversation, keeping guest files. If herdr restores a plain shell,
+  run that command there. Live restart behavior remains unverified.
+  `saint ls` lists sessions.
 - **Turn off Claude Code's telemetry:** bind `saint.telemetry` to toggle it;
   herdr shows a notification saying whether it is now on or off.
 

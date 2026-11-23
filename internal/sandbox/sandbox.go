@@ -65,6 +65,10 @@ type CreateOptions struct {
 	MemoryGB int
 	Name     string
 
+	// Direct creates a stopped container whose init runs the agent during an
+	// attached start. Legacy containers use the tmux bootstrap instead.
+	Direct bool
+
 	// ProxyToken is the per-session credential the guest presents to the local
 	// proxy in place of a real provider key. It is never the upstream key.
 	ProxyToken string
@@ -114,6 +118,9 @@ type CreateOptions struct {
 
 // AttachOptions tells attach how to rebuild a session that is no longer there.
 type AttachOptions struct {
+	// DirectContext selects an attached start of a direct container and
+	// controls the lifetime of its local container CLI process.
+	DirectContext context.Context
 	// Workdir is where a recreated session starts.
 	Workdir string
 	// Command is the agent to run when the session had to be recreated. Empty
