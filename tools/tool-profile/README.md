@@ -8,8 +8,11 @@ Only this build context is sent to the builder.
 
 The `baseline` stage contains Claude, Bash, Git, Python (including venv/pip), SSH
 client, ripgrep, curl, less, terminfo, certificates and their Debian runtime
-closure. The `disks` stage splits that **same** filesystem into EROFS `/usr` and
-a journaled ext4 private root. Builder packages are outside both compared profiles.
+closure. The `disks` stage uses that **same tool closure** for EROFS `/usr` and
+a reconstructed journaled ext4 private root. The root copies `/etc`, creates an
+empty agent home and mountpoint skeleton, and omits package-manager state under
+`/var/lib`; it is not a byte-identical copy of the baseline root. Builder packages
+are outside both compared profiles.
 The native Claude tarball, base OCI image and signed Debian snapshot are pinned.
 A dated snapshot fixes package resolution, but is not proof of current security
 support. Refresh pins and review the full package inventory before qualification.
