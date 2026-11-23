@@ -94,6 +94,10 @@ type Config struct {
 	// as its headers arrive. Callbacks must be safe for concurrent requests.
 	OnUpstreamStatus func(sessionID, provider string, status int)
 
+	// OnHostReached observes successful upstream connections/responses.
+	// It must be concurrency-safe and return promptly.
+	OnHostReached func(sessionID, host string)
+
 	// OnRequestStart is called when an attributed request begins crossing the
 	// proxy and returns a function called exactly once when it finishes.
 	//
@@ -341,8 +345,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Error(rw, "upstream request failed", http.StatusBadGateway)
 	}
-	if p.cfg.OnUsage != nil || p.cfg.OnUpstreamError != nil || p.cfg.OnUpstreamStatus != nil {
-		reverse.ModifyResponse = p.observeResponse(sessionID, provider)
+	if p.cfg.OnUsage != nil || p.cfg.OnUpstreamError != nil || p.cfg.OnUpstreamStatus != nil || p.cfg.OnHostReached != nil {
+		reverse.ModifyResponse = func(resp *http.Response) error {
+			p.hostReached(sessionID, upstream.Hostname())
+			return p.observeResponse(sessionID, provider)(resp)
+		}
 	}
 	reverse.ServeHTTP(w, r)
 }
@@ -576,4 +583,16 @@ func stripAuthHeaders(h http.Header) {
 			h.Del(key)
 		}
 	}
+}
+
+func (p *Proxy) hostReached(sessionID, host string) {
+	if p.cfg.OnHostReached == nil {
+		return
+	}
+	defer func() {
+		if recover() != nil && p.cfg.Logf != nil {
+			p.cfg.Logf("host observation callback panicked")
+		}
+	}()
+	p.cfg.OnHostReached(sessionID, host)
 }

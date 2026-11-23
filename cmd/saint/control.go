@@ -28,9 +28,10 @@ import (
 // JSON object per line in each direction.
 
 const (
-	controlOpPing   = "ping"
-	controlOpListen = "listen"
-	controlOpEgress = "egress"
+	controlOpSummary = "summary"
+	controlOpPing    = "ping"
+	controlOpListen  = "listen"
+	controlOpEgress  = "egress"
 
 	// controlTimeout bounds a ping or listen exchange. Listening can wait for a
 	// session's gateway to come up, which takes under a second when measured.
@@ -83,6 +84,7 @@ type controlAnswer struct {
 
 // controlHandlers is what the proxy process answers with.
 type controlHandlers struct {
+	summary   func(string)
 	listeners func() []string
 	listen    func(ctx context.Context, sessionID string) (string, error)
 	egress    func(sessionID string, conn *controlConn)
@@ -170,6 +172,13 @@ func handleControl(conn net.Conn, h controlHandlers, logf func(string, ...any)) 
 	_ = conn.SetReadDeadline(time.Time{})
 
 	switch req.Op {
+	case controlOpSummary:
+		if h.summary == nil {
+			_ = c.send(controlResponse{Error: "summary unavailable"})
+			return
+		}
+		h.summary(req.Session)
+		_ = c.send(controlResponse{OK: true})
 	case controlOpPing:
 		resp := controlResponse{OK: true, PID: os.Getpid()}
 		if h.listeners != nil {
