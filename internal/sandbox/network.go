@@ -13,7 +13,10 @@ const DefaultNetwork = "default"
 
 // networkEntry mirrors the shape of `container network ls --format json`.
 type networkEntry struct {
-	ID     string `json:"id"`
+	ID            string `json:"id"`
+	Configuration struct {
+		Labels map[string]string `json:"labels"`
+	} `json:"configuration"`
 	Status struct {
 		IPv4Gateway string `json:"ipv4Gateway"`
 		IPv4Subnet  string `json:"ipv4Subnet"`
@@ -120,7 +123,15 @@ func (a *AppleContainer) CreateNetwork(ctx context.Context, name string) (string
 	if err := ValidateContainerName(name); err != nil {
 		return "", fmt.Errorf("create network: %w", err)
 	}
-	stdout, _, err := a.run(ctx, "network", "ls", "--format", "json")
+	record, err := a.profileRecord(name)
+	if err != nil {
+		return "", err
+	}
+	run := a.run
+	if record != nil {
+		run = a.runProfile
+	}
+	stdout, _, err := run(ctx, "network", "ls", "--format", "json")
 	if err != nil {
 		return "", fmt.Errorf("list container networks: %w", err)
 	}
@@ -128,12 +139,19 @@ func (a *AppleContainer) CreateNetwork(ctx context.Context, name string) (string
 	if err != nil {
 		return "", err
 	}
+	if record != nil && exists {
+		return "", fmt.Errorf("experimental network already exists: %s", name)
+	}
 	if !exists {
-		if _, _, err := a.run(ctx, "network", "create", "--internal",
-			"--label", SessionNetworkLabel+"="+strings.TrimPrefix(name, "saint-"), name); err != nil {
+		args := []string{"network", "create", "--internal", "--label", SessionNetworkLabel + "=" + strings.TrimPrefix(name, "saint-")}
+		if record != nil {
+			args = append(args, "--label", "saint.profile.owner="+record.Owner)
+		}
+		args = append(args, name)
+		if _, _, err := run(ctx, args...); err != nil {
 			return "", fmt.Errorf("create network %s: %w", name, err)
 		}
-		if stdout, _, err = a.run(ctx, "network", "ls", "--format", "json"); err != nil {
+		if stdout, _, err = run(ctx, "network", "ls", "--format", "json"); err != nil {
 			return "", fmt.Errorf("list container networks: %w", err)
 		}
 	}
@@ -148,7 +166,15 @@ func (a *AppleContainer) RemoveNetwork(ctx context.Context, name string) error {
 	if err := ValidateContainerName(name); err != nil {
 		return fmt.Errorf("remove network: %w", err)
 	}
-	stdout, _, err := a.run(ctx, "network", "ls", "--format", "json")
+	record, err := a.profileRecord(name)
+	if err != nil {
+		return err
+	}
+	run := a.run
+	if record != nil {
+		run = a.runProfile
+	}
+	stdout, _, err := run(ctx, "network", "ls", "--format", "json")
 	if err != nil {
 		return fmt.Errorf("list container networks: %w", err)
 	}
@@ -156,7 +182,18 @@ func (a *AppleContainer) RemoveNetwork(ctx context.Context, name string) error {
 	if err != nil || !exists {
 		return err
 	}
-	if _, _, err := a.run(ctx, "network", "delete", name); err != nil {
+	if record != nil {
+		var entries []networkEntry
+		if err = json.Unmarshal(stdout, &entries); err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if e.ID == name && e.Configuration.Labels["saint.profile.owner"] != record.Owner {
+				return fmt.Errorf("network ownership mismatch: %s", name)
+			}
+		}
+	}
+	if _, _, err := run(ctx, "network", "delete", name); err != nil {
 		return fmt.Errorf("delete network %s: %w", name, err)
 	}
 	return nil

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
+	"github.com/montcao/saint/internal/toolprofile"
 	"io"
 	"os"
 	"os/exec"
@@ -30,6 +32,7 @@ const (
 	envRepo    = "SAINT_REPO"
 	envRuntime = "SAINT_RUNTIME"
 	envSession = "SAINT_SESSION"
+	envProfile = "SAINT_EXPERIMENTAL_PROFILE"
 )
 
 // herdrContext is the part of HERDR_PLUGIN_CONTEXT_JSON an action reads.
@@ -137,8 +140,22 @@ func runHerdr(ctx context.Context, deps sessionDeps, args []string) error {
 // can see it.
 func runHerdrOpen(ctx context.Context, args []string) error {
 	name := ""
-	if len(args) > 0 {
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		name = args[0]
+		args = args[1:]
+	}
+	fs := flag.NewFlagSet("herdr open", flag.ContinueOnError)
+	profile := fs.String("experimental-profile", "", "reviewed /absolute/manifest.json#sha256")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return errors.New("unexpected herdr open arguments")
+	}
+	if *profile != "" {
+		if _, _, err := toolprofile.ParseRef(*profile); err != nil {
+			return err
+		}
 	}
 	rt, err := parseRuntime(name)
 	if err != nil {
@@ -152,6 +169,8 @@ func runHerdrOpen(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Always clear inherited opt-in state for ordinary actions.
+	openArgs = append(openArgs, "--env", envProfile+"="+*profile)
 	cmd := exec.CommandContext(ctx, herdrBinary(), openArgs...)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = os.Stderr
@@ -212,9 +231,10 @@ func herdrPane(ctx context.Context, deps sessionDeps, in *prompter, out io.Write
 		return err
 	}
 	return startAndAttach(ctx, deps, in, out, session.CreateRequest{
-		Repos:           []sandbox.Repo{{Path: repo}},
-		Runtime:         rt,
-		SkipPermissions: true,
+		ExperimentalProfile: os.Getenv(envProfile),
+		Repos:               []sandbox.Repo{{Path: repo}},
+		Runtime:             rt,
+		SkipPermissions:     true,
 	})
 }
 
@@ -226,6 +246,10 @@ func reattach(ctx context.Context, deps sessionDeps, ref string, out io.Writer) 
 		return err
 	}
 	printBilling(out, found)
+	if found.ExperimentalProfile != "" {
+		printDirectLifetime(out)
+		return attachDirect(ctx, deps, found, nil, out)
+	}
 	// Start fails for a session that is already running, which is fine.
 	_ = deps.svc.Start(ctx, found.ID)
 	if err := serveSession(ctx, deps, found.ID); err != nil {
@@ -238,6 +262,10 @@ func reattach(ctx context.Context, deps sessionDeps, ref string, out io.Writer) 
 // in for as long as the attach lasts, so the proxy knows where to ask about a
 // host for it.
 func attachHere(deps sessionDeps, sessionID string) error {
+	return withHerdrPane(deps, sessionID, func() error { return execAttach(deps.svc.AttachCmd(sessionID)) })
+}
+
+func withHerdrPane(deps sessionDeps, sessionID string, run func() error) error {
 	var pane *store.HerdrPane
 	if deps.pane != nil {
 		pane = deps.pane()
@@ -256,7 +284,7 @@ func attachHere(deps sessionDeps, sessionID string) error {
 			})
 		}()
 	}
-	return execAttach(deps.svc.AttachCmd(sessionID))
+	return run()
 }
 
 // currentHerdrPane is the herdr pane this process runs in, from the variables
@@ -285,21 +313,45 @@ func currentHerdrPane() *store.HerdrPane {
 
 // startAndAttach creates a session behind the proxy and attaches to it.
 func startAndAttach(ctx context.Context, deps sessionDeps, in *prompter, out io.Writer, req session.CreateRequest) error {
-	if _, err := ensureService(ctx, deps, in, out); err != nil {
-		return err
+	// Fail before first-run prompts, credential lookup, image builds or daemon startup.
+	if req.ExperimentalProfile != "" {
+		if err := deps.svc.PreflightProfile(ctx, req.ExperimentalProfile); err != nil {
+			return err
+		}
+	}
+	if req.ExperimentalProfile == "" {
+		if _, err := ensureService(ctx, deps, in, out); err != nil {
+			return err
+		}
 	}
 
 	rt := req.Runtime
 	if rt == "" {
 		rt = sandbox.RuntimeClaude
 	}
-	if err := deps.firstRun.prepare(ctx, rt, in, out); err != nil {
-		return err
+	if req.ExperimentalProfile == "" {
+		if err := deps.firstRun.prepare(ctx, rt, in, out); err != nil {
+			return err
+		}
+	}
+	if req.ExperimentalProfile != "" {
+		if err := deps.ensureProxy(ctx); err != nil {
+			return err
+		}
+		if err := requireProfileProxy(ctx, deps); err != nil {
+			return err
+		}
 	}
 	fmt.Fprintf(out, "saint: starting a %s microVM on its own network\n", rt)
 	created, err := deps.svc.Create(ctx, req)
 	if err != nil {
 		return err
+	}
+
+	if created.ExperimentalProfile != "" {
+		printBilling(out, created)
+		printDirectLifetime(out)
+		return attachDirect(ctx, deps, created, in, out)
 	}
 
 	// The proxy listens after the container starts, not before: the

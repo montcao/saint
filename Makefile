@@ -94,3 +94,8 @@ allow-firewall: build
 
 clean:
 	rm -f $(BIN)
+
+# Opt-in research helper; never part of the normal build/install path.
+.PHONY: experimental-adapter
+experimental-adapter:
+	./scripts/build-tool-disk-adapter

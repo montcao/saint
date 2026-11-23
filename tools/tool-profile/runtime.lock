@@ -1,0 +1,4 @@
+# npm archive SHA256 and the binary SHA256 from the signed release manifest.
+version=2.1.331
+sha_arm64=9e8036c849972477264dc46409143f5c0746be59716221fc1a58314af0e02f4b
+sha_binary_arm64=3e5afea76cf6ed53f42076d8b175c4ee3d9ab34cd9b90452da115d21ad0d5d31

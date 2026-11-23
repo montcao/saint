@@ -23,6 +23,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-go@v5
         with:
@@ -37,3 +39,21 @@ jobs:
       - run: make check
 
       - run: make build
+
+      - name: Synthetic artifact and privacy boundaries
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python3 scripts/test_tool_profile_build.py
+          python3 scripts/test_tool_profile_privacy.py
+
+  adapter-security:
+    # Offline pure-function tests only: no VM, daemon, image build or credentials.
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Compile pinned adapter and run offline security tests
+        run: scripts/build-tool-disk-adapter --test

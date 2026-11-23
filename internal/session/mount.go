@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/montcao/saint/internal/sandbox"
+	"github.com/montcao/saint/internal/toolprofile"
 )
 
 func (s *Service) normalizeRepos(repos []sandbox.Repo) ([]sandbox.Repo, error) {
@@ -153,10 +154,10 @@ func (s *Service) normalizeRepoPath(raw string) (string, error) {
 	if resolved == string(filepath.Separator) {
 		return "", errors.New("repo path cannot be /")
 	}
-	if samePath(resolved, home) {
+	if excludedMount(resolved, home, false, false) {
 		return "", errors.New("repo path cannot be your home directory")
 	}
-	if underPath(resolved, s.Store.Paths().Root) {
+	if excludedMount(resolved, s.Store.Paths().Root, true, false) {
 		return "", errors.New("repo path cannot be inside ~/.saint")
 	}
 
@@ -165,13 +166,13 @@ func (s *Service) normalizeRepoPath(raw string) (string, error) {
 	// roots so the message says which of the two problems it is.
 	for _, name := range blockedHomeDirs {
 		sensitive := filepath.Join(home, name)
-		if samePath(resolved, sensitive) || underPath(resolved, sensitive) {
+		if excludedMount(resolved, sensitive, true, true) {
 			return "", fmt.Errorf("repo path %q holds credentials or tool state and cannot be mounted into a session", resolved)
 		}
 	}
 
 	for _, blocked := range blockedSystemRoots {
-		if samePath(resolved, blocked) || underPath(resolved, blocked) {
+		if excludedMount(resolved, blocked, true, true) {
 			return "", fmt.Errorf("repo path %q is a system directory and cannot be mounted into a session", resolved)
 		}
 	}
@@ -185,14 +186,29 @@ func (s *Service) normalizeRepoPath(raw string) (string, error) {
 	return resolved, nil
 }
 
-func samePath(a, b string) bool {
-	return filepath.Clean(a) == filepath.Clean(b)
+// An optional exclusion has nothing to protect when its target is absent.
+// Resolve host aliases before comparing identities and deny inspection errors.
+func excludedMount(path, root string, descendants, optional bool) bool {
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return !optional || !errors.Is(err, os.ErrNotExist)
+	}
+	if descendants {
+		return toolprofile.Overlaps(path, resolved)
+	}
+	a, err := os.Stat(path)
+	if err != nil {
+		return true
+	}
+	b, err := os.Stat(resolved)
+	return err != nil || os.SameFile(a, b)
 }
 
 func underPath(path, root string) bool {
-	rel, err := filepath.Rel(root, path)
+	root, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return false
 	}
-	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+	ok, err := toolprofile.Contains(path, root)
+	return err == nil && ok
 }

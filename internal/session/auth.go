@@ -192,6 +192,9 @@ func (s *Service) RenewCredential(ctx context.Context, id string) (store.Session
 		return store.Session{}, fmt.Errorf("session %q not found", id)
 	}
 	session := sessions[idx]
+	if session.ExperimentalProfile != "" {
+		return store.Session{}, fmt.Errorf("experimental profiles do not support credential renewal; session retained")
+	}
 
 	cfg, err := s.Store.EnsureConfig()
 	if err != nil {

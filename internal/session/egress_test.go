@@ -59,7 +59,10 @@ func (r *recordingSandbox) AttachCmd(string, sandbox.AttachOptions) (*exec.Cmd, 
 
 func newEgressService(t *testing.T) (*Service, *recordingSandbox, string) {
 	t.Helper()
-	home := t.TempDir()
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	st := store.New(home)
 	if _, err := st.EnsureConfig(); err != nil {
 		t.Fatalf("EnsureConfig() error = %v", err)
@@ -108,6 +111,23 @@ func TestCreatePutsTheSessionOnItsOwnNetwork(t *testing.T) {
 	}
 	if stored.Network != want {
 		t.Errorf("stored network = %q, want %q", stored.Network, want)
+	}
+}
+
+func TestCreateAllowsDanglingOptionalExclusion(t *testing.T) {
+	t.Parallel()
+
+	svc, sb, repo := newEgressService(t)
+	home := svc.Store.Paths().Home
+	if err := os.Symlink(filepath.Join(home, "missing"), filepath.Join(home, ".ssh")); err != nil {
+		t.Fatal(err)
+	}
+	created, err := svc.Create(t.Context(), CreateRequest{Repos: []sandbox.Repo{{Path: repo}}})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if created.ExperimentalProfile != "" || sb.proxyURL == "" {
+		t.Fatal("ordinary Create did not reach the sandbox")
 	}
 }
 

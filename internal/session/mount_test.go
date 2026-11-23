@@ -1,6 +1,7 @@
 package session
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -216,4 +217,93 @@ func TestFilesAndMissingPathsAreStillRefused(t *testing.T) {
 	if _, err := svc.normalizeRepoPath(filepath.Join(home, "nope")); err == nil {
 		t.Error("a path that does not exist was accepted")
 	}
+}
+
+func TestMountCaseInsensitiveAliases(t *testing.T) {
+	svc, home := newMountService(t, nil)
+	sensitive := filepath.Join(home, ".ssh")
+	if err := os.Mkdir(sensitive, 0700); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(home, ".SSH")
+	if _, err := os.Stat(alias); os.IsNotExist(err) {
+		t.Skip("requires case-insensitive filesystem")
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{alias, filepath.Join(home, ".SAINT")} {
+		if _, err := svc.normalizeRepoPath(path); err == nil {
+			t.Fatal("protected alias accepted")
+		}
+	}
+	project := gitRepo(t, filepath.Join(home, "Project"))
+	if _, err := svc.normalizeRepoPath(project); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMountExclusionResolution(t *testing.T) {
+	t.Parallel()
+
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := gitRepo(t, filepath.Join(dir, "projects", "project"))
+	unrelated := gitRepo(t, filepath.Join(dir, "unrelated"))
+	missing := filepath.Join(dir, "missing")
+	dangling := filepath.Join(dir, "dangling")
+	alias := filepath.Join(dir, "alias")
+	loop := filepath.Join(dir, "loop")
+	file := filepath.Join(dir, "file")
+	if err := os.WriteFile(file, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for link, target := range map[string]string{dangling: missing, alias: project, loop: loop} {
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, tc := range []struct {
+		name, path, root string
+		optional, deny   bool
+	}{
+		{"absent optional", project, missing, true, false},
+		{"dangling optional", project, dangling, true, false},
+		{"absent required", project, missing, false, true},
+		{"dangling required", project, dangling, false, true},
+		{"protected target", project, project, true, true},
+		{"protected alias", project, alias, true, true},
+		{"protected descendant", filepath.Join(project, ".git"), alias, true, true},
+		{"protected ancestor", filepath.Dir(project), alias, true, true},
+		{"disjoint alias", unrelated, alias, true, false},
+		{"loop", project, loop, true, true},
+		{"non-directory component", project, filepath.Join(file, "child"), true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := excludedMount(tc.path, tc.root, true, tc.optional); got != tc.deny {
+				t.Errorf("excludedMount() = %t, want %t", got, tc.deny)
+			}
+		})
+	}
+
+	t.Run("permission denied", func(t *testing.T) {
+		blocked := filepath.Join(dir, "blocked")
+		protected := gitRepo(t, filepath.Join(blocked, "protected"))
+		if err := os.Chmod(blocked, 0600); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := os.Chmod(blocked, 0700); err != nil {
+				t.Error(err)
+			}
+		})
+		if _, err := filepath.EvalSymlinks(protected); !errors.Is(err, os.ErrPermission) {
+			t.Skipf("requires a filesystem and user that enforce directory traversal permissions (got %v)", err)
+		}
+		if !excludedMount(project, protected, true, true) {
+			t.Fatal("uninspectable exclusion permitted the mount")
+		}
+	})
 }

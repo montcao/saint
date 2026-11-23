@@ -25,3 +25,5 @@ nothing about whether the document is still true.
 | [`docs/plans/tech-debt.md`](plans/tech-debt.md) | plan | known gaps, what would close each, and which need a decision | Reviewed: 2026-11-09 edited |
 | [`docs/agents/reviewer.md`](agents/reviewer.md) | agent prompt | how an agent reviews a branch against these rules | Reviewed: 2026-11-06 edited |
 | [`docs/agents/doc-gardener.md`](agents/doc-gardener.md) | agent prompt | how an agent checks documents against the code | Reviewed: 2026-11-06 edited |
+| [`docs/research/tool-profile/README.md`](research/tool-profile/README.md) | experiment | generic tool-disk contract, #39 implementation and #40 qualification boundaries | Reviewed: 2026-11-23 read |
+| [`tools/tool-profile/README.md`](../tools/tool-profile/README.md) | developer build | matched ARM64 baseline/disk recipes, explicit manifest generation and private artifact handling | Reviewed: 2026-11-23 read |

@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/montcao/saint/internal/session"
+	"github.com/montcao/saint/internal/store"
 	"net"
 	"os"
 	"path/filepath"
@@ -128,5 +130,41 @@ func TestPingWithNoProxy(t *testing.T) {
 
 	if pingProxy(filepath.Join(shortSocketDir(t), "proxy.sock")) {
 		t.Fatal("pingProxy() = true with nothing listening")
+	}
+}
+
+func TestProfileProxyGateRejectsLegacyResponder(t *testing.T) {
+	for _, supported := range []bool{false, true} {
+		root := shortSocketDir(t)
+		t.Setenv(store.StateDirEnv, root)
+		st, err := store.NewFromEnv(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := st.Paths().ControlSocket
+		ln, err := listenControl(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer c.Close()
+			conn := newControlConn(c)
+			var req controlRequest
+			if conn.receive(&req) == nil {
+				_ = conn.send(controlResponse{OK: true, ProfileV1: supported})
+			}
+		}()
+		err = requireProfileProxy(t.Context(), sessionDeps{svc: &session.Service{Store: st}})
+		ln.Close()
+		<-done
+		if (err == nil) != supported {
+			t.Fatalf("capability %v: %v", supported, err)
+		}
 	}
 }

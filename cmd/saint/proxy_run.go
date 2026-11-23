@@ -180,13 +180,23 @@ func listenSession(ctx context.Context, st *store.Store, containerPath string, l
 		if host, err = resolveProxyBindHost(ctx, cfg, containerPath); err != nil {
 			return "", err
 		}
-	} else if host, err = sandbox.GatewayAddr(ctx, containerPath, network); err != nil {
-		return "", err
+	} else {
+		if session.ExperimentalProfile != "" {
+			host, err = sandbox.ProfileGateway(ctx, containerPath, network)
+		} else {
+			host, err = sandbox.GatewayAddr(ctx, containerPath, network)
+		}
+		if err != nil {
+			return "", err
+		}
 	}
 
 	addr, err := listeners.ensure(ctx, network, host)
 	if err != nil {
 		return "", err
+	}
+	if session.ExperimentalProfile != "" {
+		return addr, nil
 	}
 	ready := filepath.Join(st.Paths().SessionsDir, sessionID, sandbox.ProxyReadyFile)
 	if err := os.WriteFile(ready, nil, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {

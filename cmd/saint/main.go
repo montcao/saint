@@ -46,7 +46,7 @@ func requireSystemBinary(path string) error {
 func main() {
 	if err := run(context.Background(), os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		os.Exit(commandExitStatus(err))
 	}
 }
 
@@ -87,6 +87,7 @@ func run(ctx context.Context, args []string) error {
 	}
 
 	sb := sandbox.NewAppleContainer(containerPath, logger.Printf)
+	sb.SetProfileRoot(filepath.Join(st.Paths().Root, "tool-profiles"))
 	kc := keychain.New(systemSecurityPath, logger.Printf)
 	inspector := inventory.NewRepoInspector(gitPath, logger.Printf)
 	// Sessions created before tokens moved out of the mounted session directory
@@ -201,6 +202,7 @@ action; see README.md.
 
 Usage:
   saint new [-rt claude|codex] [-name N] [-ask] <repo>...   create a session and attach
+    --experimental-profile /absolute/manifest.json#sha256   opt-in verified tool disk (Claude only)
   saint attach <session>     attach to a session
   saint ls                   list sessions and files to review
   saint stop <session>       stop a session's microVM
@@ -382,6 +384,7 @@ func runKeychain(ctx context.Context, kc *keychain.Keychain, args []string) erro
 func runNew(ctx context.Context, deps sessionDeps, args []string) error {
 	fs := flag.NewFlagSet("new", flag.ContinueOnError)
 	runtimeFlag := fs.String("rt", "", "runtime: claude or codex")
+	profileFlag := fs.String("experimental-profile", "", "reviewed /absolute/manifest.json#sha256 (opt-in)")
 	nameFlag := fs.String("name", "", "session name")
 	promptFlag := fs.String("p", "", "initial prompt")
 	cpusFlag := fs.Int("cpus", 0, "CPU limit")
@@ -411,14 +414,15 @@ func runNew(ctx context.Context, deps sessionDeps, args []string) error {
 	}
 
 	return startAndAttach(ctx, deps, newPrompter(os.Stdin), os.Stdout, session.CreateRequest{
-		Name:            *nameFlag,
-		Repos:           repos,
-		Runtime:         runtime,
-		Prompt:          *promptFlag,
-		CPUs:            *cpusFlag,
-		MemoryGB:        *memoryFlag,
-		SkipPermissions: !*askFlag,
-		Credential:      *credentialFlag,
+		Name:                *nameFlag,
+		Repos:               repos,
+		Runtime:             runtime,
+		Prompt:              *promptFlag,
+		CPUs:                *cpusFlag,
+		MemoryGB:            *memoryFlag,
+		SkipPermissions:     !*askFlag,
+		Credential:          *credentialFlag,
+		ExperimentalProfile: *profileFlag,
 	})
 }
 
