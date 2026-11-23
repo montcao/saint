@@ -1,4 +1,4 @@
-# Pinned native artifact also used by the direct-pane work in PR #38.
-# Refresh this pin and the Debian snapshot together during qualification.
-version=2.1.247
-sha_arm64=43384995766bbc35c7b9f5e034d3b010be20d3c4d70b69a1c7cc4fe29caee54b
+# npm archive SHA256 and the binary SHA256 from the signed release manifest.
+version=2.1.331
+sha_arm64=9e8036c849972477264dc46409143f5c0746be59716221fc1a58314af0e02f4b
+sha_binary_arm64=3e5afea76cf6ed53f42076d8b175c4ee3d9ab34cd9b90452da115d21ad0d5d31

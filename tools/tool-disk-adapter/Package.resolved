@@ -1,4 +1,5 @@
 {
+  "originHash": "7299d18a2a4db7fb27f0e7324901df9226ba19e5a173e2794193fdc36ec34698",
   "pins": [
     {
       "identity": "async-http-client",
@@ -139,8 +140,8 @@
       "kind": "remoteSourceControl",
       "location": "https://github.com/apple/swift-crypto.git",
       "state": {
-        "revision": "95ba0316a9b733e92bb6b071255ff46263bbe7dc",
-        "version": "3.15.1"
+        "revision": "da9d28d69ebe3894b18376c8f2395c2f37b8448f",
+        "version": "4.5.2"
       }
     },
     {
@@ -150,24 +151,6 @@
       "state": {
         "revision": "dc4030184203ffafbb2ec614352487235d747fe0",
         "version": "1.4.1"
-      }
-    },
-    {
-      "identity": "swift-docc-plugin",
-      "kind": "remoteSourceControl",
-      "location": "https://github.com/swiftlang/swift-docc-plugin.git",
-      "state": {
-        "revision": "647c708be89f834fa6a6d4945442793a77ddf5b6",
-        "version": "1.5.0"
-      }
-    },
-    {
-      "identity": "swift-docc-symbolkit",
-      "kind": "remoteSourceControl",
-      "location": "https://github.com/swiftlang/swift-docc-symbolkit",
-      "state": {
-        "revision": "b45d1f2ed151d057b54504d653e0da5552844e34",
-        "version": "1.0.0"
       }
     },
     {
@@ -229,8 +212,8 @@
       "kind": "remoteSourceControl",
       "location": "https://github.com/apple/swift-nio-http2.git",
       "state": {
-        "revision": "61d1b44f6e4e118792be1cff88ee2bc0267c6f9a",
-        "version": "1.44.0"
+        "revision": "bf446775a1683f5dc13240f56de2f9c55c299431",
+        "version": "1.46.1"
       }
     },
     {

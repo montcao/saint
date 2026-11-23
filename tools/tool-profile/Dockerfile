@@ -20,7 +20,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && curl --fail --show-error --silent --location --proto '=https' --proto-redir '=https' \
        "https://registry.npmjs.org/@anthropic-ai/claude-code-linux-arm64/-/claude-code-linux-arm64-${version}.tgz" -o /tmp/claude.tgz \
     && printf '%s  /tmp/claude.tgz\n' "$sha_arm64" | sha256sum -c - \
-    && mkdir /out && tar -xzf /tmp/claude.tgz -C /out --strip-components=1 package/claude
+    && mkdir /out && tar -xzf /tmp/claude.tgz -C /out --strip-components=1 package/claude \
+    && printf '%s  /out/claude\n' "$sha_binary_arm64" | sha256sum -c -
 
 FROM base AS baseline
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -37,7 +38,7 @@ FROM base AS assemble
 RUN apt-get update && apt-get install -y --no-install-recommends erofs-utils e2fsprogs python3
 COPY --from=baseline / /tree/
 COPY assemble.py /assemble.py
-RUN python3 /assemble.py /tree /out
+RUN --network=none python3 /assemble.py /tree /out
 
 FROM scratch AS disks
 COPY --from=assemble /out/ /

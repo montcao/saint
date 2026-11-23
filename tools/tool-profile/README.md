@@ -15,7 +15,18 @@ empty agent home and mountpoint skeleton, and omits package-manager state under
 are outside both compared profiles.
 The native Claude tarball, base OCI image and signed Debian snapshot are pinned.
 A dated snapshot fixes package resolution, but is not proof of current security
-support. Refresh pins and review the full package inventory before qualification.
+support. Review the pinned base and signed Debian package inputs before building:
+the package acquisition and installation stages use the network and may run
+Debian maintainer scripts. Refresh pins and review the full package inventory
+before qualification.
+
+When refreshing `runtime.lock`, verify the downloaded npm archive against the
+registry's `dist.integrity` and record the SHA256 of those same archive bytes.
+Verify the vendor signature on the exact release manifest and compare its
+Linux ARM64 checksum with the extracted binary before recording the binary
+SHA256. Use [Anthropic's manifest verification instructions](https://code.claude.com/docs/en/setup#verify-the-manifest-signature).
+The Docker recipe checks both pinned hashes. These checks cover Claude artifact
+integrity. The broader profile review remains under #40.
 
 On the isolated builder, use a new private output directory:
 
@@ -35,8 +46,13 @@ Use the baseline as the scaffold descriptor for the disk-backed guest, so proces
 metadata and platform agree; its image bytes are a separately counted shared cost.
 
 The assembly emits `tools.erofs`, `root.ext4`, `packages.tsv` and
-`build-receipt.json`. A fixed-size 256 MiB root has a journal initialized before
-use. Its logical size is an input choice, not an allocated-storage measurement.
+`build-receipt.json`. Assembly runs without network access and uses the builder's
+disk tools and `dpkg-query` to inspect the copied tree. The Claude hashes and
+native ELF header are checked without executing Claude. Defer its version
+check and all guest execution until the applicable security review under #40
+has approved the exact artifacts. A fixed-size 256 MiB root has a journal
+initialized before use. Its logical size is an input choice, not an
+allocated-storage measurement.
 EROFS takes a fixed timestamp; ext4 tooling can include generated metadata, so
 byte-for-byte disk reproducibility across builds is not asserted. The receipt
 binds this build's actual disk bytes and package inventory. Preserve the explicit

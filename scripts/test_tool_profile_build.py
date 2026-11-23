@@ -6,12 +6,13 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 
 def load(name, filename):
-    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(filename))
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).parent / filename)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -19,6 +20,7 @@ def load(name, filename):
 
 profile = load('profile', 'make-tool-profile.py')
 wrapper = load('wrapper', 'wrap-tool-disk.py')
+assembly = load('assembly', '../tools/tool-profile/assemble.py')
 
 
 class BuildBoundaryTests(unittest.TestCase):
@@ -91,6 +93,35 @@ class BuildBoundaryTests(unittest.TestCase):
                 wrapper.wrap(self.inputs['tools'], profile.artifact(self.inputs['tools'])['sha256'], dest)
         run.assert_not_called()
         self.assertEqual(dest.read_bytes(), b'neighbor')
+
+    def test_assembly_only_invokes_builder_utilities(self):
+        tree = self.root / 'tree'
+        (tree / 'usr/bin').mkdir(parents=True)
+        (tree / 'usr/local/bin').mkdir(parents=True)
+        (tree / 'etc').mkdir()
+        for name in assembly.REQUIRED:
+            (tree / 'usr/bin' / name).touch()
+        (tree / 'usr/local/bin/claude').write_bytes(b'\x7fELF' + bytes(14) + b'\xb7\x00')
+        out = self.root / 'output'
+        inventory = 'bash\tfixture\tarm64\n'
+
+        def disk_tool(argv, *, check):
+            if argv[0] == 'mkfs.erofs':
+                (out / 'tools.erofs').touch()
+
+        with patch.object(assembly.os, 'uname', return_value=SimpleNamespace(machine='aarch64')), \
+             patch.object(assembly.os, 'chown'), patch.object(assembly, 'sha', return_value='0' * 64), \
+             patch.object(assembly.subprocess, 'run', side_effect=disk_tool) as run, \
+             patch.object(assembly.subprocess, 'check_output', return_value=inventory) as query:
+            assembly.assemble(tree, out)
+
+        self.assertEqual([invocation.args[0][0] for invocation in run.call_args_list],
+                         ['mkfs.erofs', 'mke2fs', 'e2fsck'])
+        self.assertEqual(query.call_args_list, [call([
+            'dpkg-query', '--admindir=' + str(tree / 'var/lib/dpkg'), '-W',
+            '-f=${Package}\t${Version}\t${Architecture}\n',
+        ], text=True)])
+        self.assertEqual((out / 'packages.tsv').read_text(), inventory)
 
 
 if __name__ == '__main__':

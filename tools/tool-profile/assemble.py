@@ -37,8 +37,6 @@ def assemble(tree, out):
         header = f.read(20)
     if header[:4] != b'\x7fELF' or int.from_bytes(header[18:20], 'little') != 183:
         raise ValueError('Claude must be native ARM64 ELF')
-    subprocess.run(['chroot', str(tree), '/usr/local/bin/claude', '--version'], check=True,
-                   env={'PATH': '/usr/bin:/bin', 'HOME': '/home/agent', 'DISABLE_UPDATES': '1'})
     out.mkdir(mode=0o700)
     root = out / 'root-tree'
     root.mkdir()
@@ -69,7 +67,7 @@ def assemble(tree, out):
                     '-E', 'lazy_itable_init=0,lazy_journal_init=0',
                     '-d', str(root), str(disk)], check=True)
     subprocess.run(['e2fsck', '-fn', str(disk)], check=True)
-    inventory = subprocess.check_output(['chroot', str(tree), 'dpkg-query', '-W',
+    inventory = subprocess.check_output(['dpkg-query', '--admindir=' + str(tree / 'var/lib/dpkg'), '-W',
                                         '-f=${Package}\t${Version}\t${Architecture}\n'], text=True)
     (out / 'packages.tsv').write_text(inventory)
     # Inventory includes Debian runtime closure; Claude's hash is recorded separately.

@@ -29,6 +29,8 @@ ARM64 baseline and raw EROFS/journaled ext4 artifacts, wraps the raw tool disk i
 ULFO, and generates manifests bound to the exact build receipt. Code and synthetic
 checks are present; actual Linux image builds, positive VM/tool execution and
 interactive terminal/concurrent-pane acceptance remain live gates under #40.
+Review the pinned Debian inputs before building. Review the exact profile
+artifacts before running Claude, including its version check, or booting a guest.
 Do not close #39 on synthetic evidence alone.
 
 ## Selecting a profile
