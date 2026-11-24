@@ -81,6 +81,7 @@ func (a *AppleContainer) Create(ctx context.Context, name string, rt Runtime, re
 	// it at runtime. Set here as well as in the Dockerfile so a container built
 	// from an image that predates the pin is fixed without a rebuild.
 	args = append(args, "--env", "DISABLE_UPDATES=1")
+	args = append(args, gitIdentityEnv(opts.GitName, opts.GitEmail)...)
 	if rt == RuntimeClaude && opts.ClaudeTelemetryOff {
 		for _, assignment := range claudeTelemetryOffEnv {
 			args = append(args, "--env", assignment)
@@ -163,6 +164,9 @@ func (a *AppleContainer) Create(ctx context.Context, name string, rt Runtime, re
 			return fmt.Errorf("create: %w", err)
 		}
 		args = append(args, "--volume", skill.Path+":/saint/skills/"+skill.Name+":ro")
+	}
+	if opts.ClaudeConfigDir != "" && rt == RuntimeClaude {
+		args = append(args, "--volume", opts.ClaudeConfigDir+":"+guestClaudeConfigMount+":ro")
 	}
 	args = append(args, "--volume", sessionDir+":/saint")
 
@@ -314,6 +318,9 @@ func runtimeBootstrapScript(rt Runtime, workdir string, opts CreateOptions) (str
 	// has no locale at all: give them the same UTF-8 one the attach uses.
 	lines := []string{"set -u", "export LANG=" + guestLocale}
 	lines = append(lines, onboardingLines(rt, workdir)...)
+	if opts.ClaudeConfigDir != "" {
+		lines = append(lines, claudeConfigLines(rt)...)
+	}
 	if opts.Network != "" {
 		lines = append(lines,
 			"_saint_i=0",
@@ -391,6 +398,47 @@ func onboardingLines(rt Runtime, workdir string) []string {
 			`"$_saint_v" ` + shellQuote(jsonQuote(workdir)) + ` > "$HOME/.claude.json"`,
 		`fi`,
 	}
+}
+
+// guestClaudeConfigMount is where the read-only configuration snapshot is
+// mounted. It is outside /saint, which is guest-writable.
+const guestClaudeConfigMount = "/saint-host/claude"
+
+// claudeConfigLines link the user's configuration snapshot into the guest's
+// ~/.claude.
+//
+// settings.json is copied rather than linked, because Claude Code writes to it
+// and a read-only link would make those writes fail; the copy is refreshed on
+// every start, so the host's snapshot stays the source. Everything else is a
+// link to the read-only mount. An entry the guest has replaced with a real
+// file or directory of its own is left alone.
+func claudeConfigLines(rt Runtime) []string {
+	if rt != RuntimeClaude {
+		return nil
+	}
+	m := guestClaudeConfigMount
+	return []string{
+		`mkdir -p "$HOME/.claude" 2>/dev/null || true`,
+		`if [ -f ` + m + `/settings.json ]; then cp ` + m + `/settings.json "$HOME/.claude/settings.json" 2>/dev/null || true; fi`,
+		`for _saint_n in CLAUDE.md skills agents commands output-styles; do`,
+		`  if [ -e "` + m + `/$_saint_n" ] && { [ ! -e "$HOME/.claude/$_saint_n" ] || [ -L "$HOME/.claude/$_saint_n" ]; }; then`,
+		`    ln -sfn "` + m + `/$_saint_n" "$HOME/.claude/$_saint_n" 2>/dev/null || true`,
+		`  fi`,
+		`done`,
+	}
+}
+
+// gitIdentityEnv gives the guest the user's git identity. git reads these
+// before any config file, so no file in the guest needs writing.
+func gitIdentityEnv(name, email string) []string {
+	var env []string
+	if name != "" {
+		env = append(env, "--env", "GIT_AUTHOR_NAME="+name, "--env", "GIT_COMMITTER_NAME="+name)
+	}
+	if email != "" {
+		env = append(env, "--env", "GIT_AUTHOR_EMAIL="+email, "--env", "GIT_COMMITTER_EMAIL="+email)
+	}
+	return env
 }
 
 // jsonQuote renders a Go string as a JSON string literal.

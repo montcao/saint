@@ -260,6 +260,36 @@ Refused regardless of the mount roots, after resolving symlinks:
 What a session can reach on the network is in
 [Network access](#network-access).
 
+### Your Claude Code setup inside a session
+
+`~/.claude` is never mounted, because it also holds every prompt you have typed,
+every transcript and your login state. Instead, when a Claude session is
+created, saint copies a filtered snapshot into `~/.saint/guest-config/<session>`
+and mounts it read-only. The agent sees it as its own `~/.claude`. If
+`CLAUDE_CONFIG_DIR` is set, saint copies from there instead.
+
+| Copied | Not copied |
+|---|---|
+| `CLAUDE.md` | `~/.claude.json`: your account and MCP servers |
+| `settings.json`, reduced to `permissions`, `model`, `outputStyle`, `autoMode`, `tui`, `language`, `alwaysThinkingEnabled`, `cleanupPeriodDays`, `includeCoAuthoredBy`, `spinnerTipsEnabled` | settings keys that hold secrets or run commands: `env`, `apiKeyHelper`, `hooks`, `statusLine`, plugins, and every MCP key |
+| `skills/<name>/`, only folders Claude Code would load as a skill (a skill file at their top level) | history, transcripts (`projects/`), credentials, plugins |
+| `agents/`, `commands/`, `output-styles/` | symlinks inside those folders, and files that look like credentials (`.env`, `*.pem`, `*.key`, `id_*`) |
+
+- **Size limits:** each file is limited to 2 MiB and the snapshot to 32 MiB. A
+  skill installed as a symlink to its folder is copied.
+- **Skipped files:** anything left out is named in saint's log.
+- **MCP servers stay off.** Their definitions often carry tokens.
+- **It's a snapshot, not a live view.** A change on the host reaches new
+  sessions only. Renewing a session's credential keeps the copy the session
+  was created with, for the same reason a changed skill blocks renewal: nobody
+  reviewed the new version for that session.
+- **`settings.json` is a copy.** The agent can change its own copy, but the
+  snapshot replaces it each time the session starts, so the host stays the
+  source.
+- **Commits carry your name.** The guest gets your git `user.name` and
+  `user.email`, and nothing else from your git configuration, as
+  `GIT_AUTHOR_*` and `GIT_COMMITTER_*`.
+
 ### Permissions and pinned runtimes
 
 By default the agent edits without asking: the microVM is the boundary, and an

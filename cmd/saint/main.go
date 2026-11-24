@@ -107,6 +107,11 @@ func run(ctx context.Context, args []string) error {
 		Sandbox: sb,
 		Workdir: workdir,
 		Logf:    logger.Printf,
+
+		// Claude Code honours CLAUDE_CONFIG_DIR in place of ~/.claude, so
+		// saint copies from the same place the user's own agent reads.
+		HostClaudeDir: os.Getenv("CLAUDE_CONFIG_DIR"),
+		GitIdentity:   hostGitIdentity,
 	}
 	svc.Credentials = func(spec string) (credential.Source, error) {
 		return sessionCredential(st, kc, spec)

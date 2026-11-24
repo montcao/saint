@@ -9,7 +9,7 @@ marked *checked* fail `make check` when broken (`internal/archtest`).
 |---|---|
 | `internal/inventory` | `saint ls`: which sessions exist, their state, and files in their repositories to review |
 | `internal/proxy` | the credential boundary and usage metering |
-| `internal/session` | session lifecycle and what a guest may mount |
+| `internal/session` | session lifecycle, what a guest may mount, and the read-only snapshot of the user's Claude Code configuration it gets (`guestconfig.go`) |
 | `internal/sandbox` | the Apple `container` CLI |
 | `internal/credential` | where secrets come from: keychain, 1Password, command |
 | `internal/store` | JSON state under `~/.saint` |

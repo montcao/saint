@@ -110,6 +110,16 @@ type CreateOptions struct {
 	// /saint/skills/<name>. Always read-only, unlike Repo.ReadOnly: a skill
 	// is data the agent reads, never a place it writes back to.
 	SkillMounts []SkillMount
+
+	// ClaudeConfigDir is a host directory holding a filtered snapshot of the
+	// user's Claude Code configuration, mounted read-only and linked into the
+	// guest's ~/.claude. Empty mounts nothing.
+	ClaudeConfigDir string
+
+	// GitName and GitEmail are the user's git identity, given to the guest as
+	// GIT_AUTHOR_* and GIT_COMMITTER_* so its commits carry the user's name.
+	GitName  string
+	GitEmail string
 }
 
 // AttachOptions tells attach how to rebuild a session that is no longer there.
