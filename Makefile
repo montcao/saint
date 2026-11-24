@@ -94,3 +94,8 @@ allow-firewall: build
 
 clean:
 	rm -f $(BIN)
+
+# A real Mac, Apple container and herdr are required; no Linux baseline.
+.PHONY: parity
+parity:
+	go run ./scripts/parity $(PARITY_ARGS)
