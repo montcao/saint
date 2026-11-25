@@ -24,6 +24,7 @@ make build        # build ./saint
 Full text: [`docs/design/principles.md`](docs/design/principles.md).
 
 - **Secure and seamless at once.** When the safe path and the easy path conflict, say so and let the user choose.
+- **Least privilege, and deny unless the user approves.** A guest gets nothing it was not given; every widening is the user's explicit choice, with what it exposes stated where they make it.
 - **Never show an invented number.** An unknown is `unknown`.
 - **Nothing machine-local in code or tests.** Discover at runtime, compare minimums, use `t.TempDir()`.
 - **State blast radius where the choice is made, not just in docs.**
