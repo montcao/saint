@@ -31,6 +31,8 @@ func execute(ctx context.Context, bin string, args ...string) (string, error) {
 }
 
 type options struct {
+	stagedDemo                                             bool
+	stageRepo                                              string
 	host, saint, target, repo, agent, ready, prefix, herdr string
 	timeout                                                time.Duration
 	runs                                                   int
@@ -44,6 +46,8 @@ func mainRun(args []string, out, errs io.Writer) int {
 	var reportPath, observationsPath, evaluatePath string
 	fs := flag.NewFlagSet("parity", flag.ContinueOnError)
 	fs.SetOutput(errs)
+	fs.BoolVar(&o.stagedDemo, "staged-demo-only", false, "run one long multiline staged diagnostic per side, then stop")
+	fs.StringVar(&o.stageRepo, "stage-repo", "", "explicit disposable repository shared at the same path in both panes; stage separate host-only and guest diagnostic scripts")
 	fs.BoolVar(&o.preflightOnly, "preflight-only", false, "check execution on one pane pair without running comparisons")
 	fs.StringVar(&o.host, "host-pane", "", "existing idle host agent pane (paired with -saint-pane)")
 	fs.StringVar(&o.saint, "saint-pane", "", "existing idle saint agent pane")
@@ -109,7 +113,7 @@ func mainRun(args []string, out, errs io.Writer) int {
 	return runLive(ctx, o, reportPath, out, errs, execute)
 }
 
-func runLive(ctx context.Context, o options, reportPath string, out, errs io.Writer, run runner) int {
+func runLive(ctx context.Context, o options, reportPath string, out, errs io.Writer, run runner) (code int) {
 	var timings []latencyPair
 	d := driver{run: run, bin: o.herdr, timeout: o.timeout, prefix: o.prefix, timings: &timings}
 	report := runReport{Version: evidenceVersion, RunID: nonce(), Created: time.Now().UTC(), Agent: o.agent}
@@ -131,6 +135,22 @@ func runLive(ctx context.Context, o options, reportPath string, out, errs io.Wri
 	fmt.Fprintf(out, "UTC: %s; agent: %s; comparisons do not establish visual or lifecycle parity\n", time.Now().UTC().Format(time.RFC3339), o.agent)
 	fmt.Fprintln(out, "Execution preflight sends a harmless command to dedicated idle panes; unexpected model handling remains possible. Stop and inspect locally if it fails.")
 	var preflightErr error
+	if o.stageRepo != "" {
+		stages, err := newStagedScripts(o.stageRepo, o.host, o.saint)
+		if err != nil {
+			fmt.Fprintln(errs, err)
+			return 2
+		}
+		d.stages = stages
+		fmt.Fprintln(out, "Guest scripts are retained while the guest is running; host-only scripts are cleaned after confirmed execution.")
+		fmt.Fprintln(out, "Staged host-only and guest diagnostic scripts; retained artifact paths are private:", stages.host.path, stages.guest.path)
+		defer func() {
+			if err := stages.cleanup(); err != nil {
+				fmt.Fprintln(errs, err)
+				code = 2
+			}
+		}()
+	}
 	if o.host == "" {
 		for range o.runs {
 			host, saint, err := d.open(ctx, o)
@@ -151,15 +171,22 @@ func runLive(ctx context.Context, o options, reportPath string, out, errs io.Wri
 			}
 		}
 	} else {
-		preflightErr = preflight(ctx, d, o.host, o.saint)
+		if o.stagedDemo {
+			preflightErr = stagedDemonstration(ctx, d, o.host, o.saint)
+		} else {
+			preflightErr = preflight(ctx, d, o.host, o.saint)
+		}
 	}
 	fmt.Fprintf(out, "host pane: %s; saint pane: %s\n", o.host, o.saint)
 	report.Preflight = "PASS: framed execution confirmed on both panes; shell-only routing not established"
-	results := unverifiedProbes(defaultProbes(), "preflight-only; comparison not run")
+	if o.stagedDemo {
+		report.Preflight = "PASS: staged multiline execution confirmed on both panes; shell-only routing not established"
+	}
+	results := unverifiedProbes(defaultProbes(), "diagnostic only; comparison not run")
 	if preflightErr != nil {
 		report.Preflight = preflightErr.Error()
 		results = unverifiedProbes(defaultProbes(), report.Preflight)
-	} else if !o.preflightOnly {
+	} else if !o.preflightOnly && !o.stagedDemo {
 		results = compareProbes(ctx, d, o.host, o.saint, defaultProbes())
 	}
 	fmt.Fprintln(out, "Preflight:", report.Preflight)
@@ -186,7 +213,7 @@ func runLive(ctx context.Context, o options, reportPath string, out, errs io.Wri
 	if preflightErr != nil {
 		return 2
 	}
-	if o.preflightOnly {
+	if o.preflightOnly || o.stagedDemo {
 		return 0
 	}
 	if passing(results) != len(results) {
@@ -196,6 +223,12 @@ func runLive(ctx context.Context, o options, reportPath string, out, errs io.Wri
 }
 
 func validateOptions(o options) error {
+	if o.stagedDemo && (o.stageRepo == "" || o.preflightOnly) {
+		return errors.New("staged-demo-only requires stage-repo and cannot combine with preflight-only")
+	}
+	if o.stageRepo != "" && (o.host == "" || o.saint == "") {
+		return errors.New("stage-repo requires an explicitly identified existing pane pair")
+	}
 	if o.prefix != "" && o.prefix != "!" {
 		return errors.New("shell-prefix must be ! or empty for dedicated shell panes")
 	}

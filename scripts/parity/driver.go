@@ -13,6 +13,7 @@ import (
 )
 
 type driver struct {
+	stages  *stagedScripts
 	run     runner
 	bin     string
 	timeout time.Duration
@@ -51,8 +52,24 @@ func probeCommand(prefix, script, id string) string {
 }
 
 // Read back each input transition; transport acknowledgement is not readiness.
-func (d driver) probe(ctx context.Context, pane, script, id string) (string, error) {
+func (d driver) probe(ctx context.Context, pane, script, id string) (outputResult string, resultErr error) {
 	command := probeCommand("", script, id)
+	verify := func() error { return nil }
+	if d.stages != nil {
+		var err error
+		command, verify, err = d.stages.prepare(pane, script, id)
+		if err != nil {
+			return "", commandFailure("stage script", err)
+		}
+		defer func() {
+			if lostExecution(resultErr) {
+				d.stages.uncertain = true
+			}
+		}()
+	}
+	if err := verify(); err != nil {
+		return "", commandFailure("verify script", err)
+	}
 	if d.prefix != "" {
 		if err := d.waitInput(ctx, pane, "❯", ""); err != nil {
 			return "", commandFailure("idle input", err)
@@ -64,6 +81,9 @@ func (d driver) probe(ctx context.Context, pane, script, id string) (string, err
 			return "", commandFailure("shell input", err)
 		}
 	}
+	if err := verify(); err != nil {
+		return "", commandFailure("verify script", err)
+	}
 	if _, err := d.call(ctx, "pane", "send-text", pane, command); err != nil {
 		return "", commandFailure("enter command", err)
 	}
@@ -71,6 +91,9 @@ func (d driver) probe(ctx context.Context, pane, script, id string) (string, err
 		if err := d.waitInput(ctx, pane, "!", command); err != nil {
 			return "", commandFailure("pending input", err)
 		}
+	}
+	if err := verify(); err != nil {
+		return "", commandFailure("verify script", err)
 	}
 	if _, err := d.call(ctx, "pane", "send-keys", pane, "Enter"); err != nil {
 		return "", commandFailure("submit command", err)

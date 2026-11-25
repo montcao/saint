@@ -325,6 +325,39 @@ handling before proceeding. Use a fresh report path for the full comparison:
 make parity PARITY_ARGS='-host-pane w1:p2 -saint-pane w1:p3 -report /tmp/parity-run.json'
 ```
 
+Long probes can exceed an agent's single-row input viewport. Use explicit
+staging for an existing dedicated pair instead of widening panes or accepting
+ambiguous wraps. The disposable repository must already be shared at the same
+canonical absolute path in both panes. The harness creates a private guest
+script directory there and a separate host-only directory under the canonical
+`/tmp`. Confirm that host temporary storage is absent from every guest mount;
+nonstandard mounts are the operator's responsibility. Neither directory changes
+agent settings or permissions.
+
+```sh
+make parity PARITY_ARGS='-host-pane w1:p2 -saint-pane w1:p3 -stage-repo /path/to/disposable -staged-demo-only -report /tmp/parity-staged-demo.json'
+```
+
+This sends one short `sh` invocation per side for a generated script exceeding
+4 KiB that prints two framed lines. Inspect both panes for model handling and
+empty ordinary input. After the demonstration succeeds, use the same
+`-stage-repo` without `-staged-demo-only` for one full comparison. Preflight and
+all probes then use separate staged copies. Full exact pending-command checks
+remain mandatory; altered text, genuine newlines and ambiguous wraps still
+stop before Enter. Invocations over 120 bytes fail before any input; use a
+shorter disposable repository path rather than weakening the check.
+
+Scripts contain only generated diagnostic code and unique frame identifiers.
+Host execution never reads the guest-writable copy. Inspection rejects changed
+identity/content, symlinks, nonregular files and unsafe permissions. This does
+not make guest output trustworthy against a malicious guest. Script locations
+are printed locally and must be removed or substituted before publishing logs.
+The harness cleans only unchanged host-only artifacts after confirmed framed
+completion. It retains guest-side artifacts while the guest can rename them,
+and retains both sides if execution is uncertain. After stopping only that
+owned guest and confirming no pending command remains, inspect and remove only
+its recorded diagnostic artifacts; never recursively delete unexpected files.
+
 Or open fresh pane pairs beside a target with an absolute repository path
 and literal text that appears only when the agent is ready:
 

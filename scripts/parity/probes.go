@@ -123,3 +123,17 @@ func printResults(out io.Writer, results []result) {
 	}
 	fmt.Fprintf(out, "Score: %d/%d (%.1f%%); NOT VERIFIED probes remain in the denominator\n", passing(results), len(results), 100*float64(passing(results))/float64(len(results)))
 }
+
+func stagedDemonstration(ctx context.Context, d driver, host, guest string) error {
+	script := "# " + strings.Repeat("synthetic long payload ", 200) + "\nprintf 'alpha\\nbeta\\n'"
+	for _, side := range []struct{ name, pane string }{{"host", host}, {"saint", guest}} {
+		got, err := d.probe(ctx, side.pane, script, nonce())
+		if err != nil {
+			return fmt.Errorf("%s staged demonstration: %s; remaining submissions stopped", side.name, failureDetail(err))
+		}
+		if got != "alpha\nbeta" {
+			return fmt.Errorf("%s staged demonstration: output mismatch; remaining submissions stopped", side.name)
+		}
+	}
+	return nil
+}
