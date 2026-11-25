@@ -441,17 +441,21 @@ the older guest has not been verified. Do not assume a JSON key being present
 means the runtime honors it. See the official [shell-mode documentation](https://code.claude.com/docs/en/interactive-mode)
 and [settings reference](https://code.claude.com/docs/en/settings-reference#respondtobashcommands).
 
-Before each command, the harness polls the **visible** input box for empty
+Before each command, the harness polls the **visible ANSI** input box for empty
 ordinary input, sends the shell-mode key, polls for empty shell input, enters
 text, checks the exact pending command, and only then sends Enter. It checks
 return to empty ordinary input after extracting output. Each poll is bounded
 by `-timeout` and cancellation. Unknown borders, wrapping, prompt glyphs or
 nonmatching content fail closed, without retrying input. The supported
 single-row box is an observation of one host UI, not a universal agent protocol
-or proof of no background work. Placeholder-looking text such as `Try "..."`
-is rejected because text readback cannot distinguish styling from typed input.
-Operators must
-still confirm idle state and inspect for model handling. Dedicated shell
+or proof of no background work. Plain placeholder-looking text such as
+`Try "..."` is rejected. The observed host placeholder is accepted only with
+the exact ANSI reset/dim/reset envelope inside the ordinary input row, or the
+observed pink shell prompt. The same words typed into the host have no dim
+envelope and remain rejected. Unknown styles, mixed typed content and unknown
+prompt colors fail closed. This is a version-specific rendering observation,
+not structured input state or a security boundary against a malicious terminal.
+Operators must still confirm idle state and inspect for model handling. Dedicated shell
 panes with an empty prefix skip agent UI checks and do not establish agent parity.
 
 Output parsing accepts plain anchored frames or exactly one observed `⎿`

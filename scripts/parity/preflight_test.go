@@ -224,6 +224,11 @@ func TestInputChecksFailClosed(t *testing.T) {
 	for _, tc := range []struct{ name, screen string }{
 		{"pending", inputBox("❯", "do something")},
 		{"typed placeholder", inputBox("❯", `Try "do something"`)},
+		{"shell typed placeholder", inputBox("\x1b[0m\x1b[38;2;253;93;177m!", `Try "example"`)},
+		{"colored typed placeholder", inputBox("❯", "\x1b[31mTry \"do something\"\x1b[0m")},
+		{"dim prefix with typed suffix", inputBox("❯", "\x1b[0m\x1b[2mTry \"example\"\x1b[0mtyped")},
+		{"partial dim placeholder", inputBox("❯", "\x1b[0m\x1b[2mTry \"\x1b[0mtyped\"\x1b[0m")},
+		{"unterminated dim placeholder", inputBox("❯", "\x1b[0m\x1b[2mTry \"example\"")},
 		{"wrong mode", inputBox("!", "")},
 		{"history hint", "! for shell mode\n"},
 		{"multiline", "────────\n❯ one\ntwo\n────────\n"},
@@ -289,7 +294,7 @@ func TestInputObservationUsesVisibleStateAndCancellation(t *testing.T) {
 	calls := 0
 	d := driver{timeout: time.Second, run: func(_ context.Context, _ string, args ...string) (string, error) {
 		calls++
-		if args[1] != "read" || args[4] != "visible" {
+		if args[1] != "read" || args[4] != "visible" || args[len(args)-1] != "ansi" {
 			t.Fatal("readiness used history or mutated pane")
 		}
 		cancel()
@@ -333,5 +338,35 @@ func TestTransitionErrorsRemainSanitized(t *testing.T) {
 				t.Fatalf("%v calls=%d", err, calls)
 			}
 		})
+	}
+}
+
+func TestStyledPlaceholderReadiness(t *testing.T) {
+	placeholder := "\x1b[0m\x1b[2mTry \"synthetic example\"\x1b[0m"
+	border := "\x1b[0m\x1b[38;2;136;136;136m────────\x1b[0m"
+	screen := border + "\r\n❯\u00a0" + placeholder + "\r\n" + border
+	if !inputMatches(screen, "❯", "") {
+		t.Fatal("observed dim placeholder rejected")
+	}
+	if !inputMatches(inputBox("\x1b[0m\x1b[38;2;253;93;177m!", placeholder), "!", "") {
+		t.Fatal("observed shell placeholder rejected")
+	}
+	if inputMatches(inputBox("!", placeholder), "!", "") {
+		t.Fatal("shell placeholder accepted")
+	}
+	if inputMatches(screen, "❯", "command") {
+		t.Fatal("placeholder accepted as pending command")
+	}
+}
+
+func TestShellInputStyleRejectsTypedPlaceholder(t *testing.T) {
+	prompt := "\x1b[0m\x1b[38;2;253;93;177m!"
+	for _, text := range []string{`Try "synthetic"`, "\x1b[0mTry \"synthetic\"", "\x1b[0m\x1b[2mTry \"synthetic\"\x1b[0mtyped"} {
+		if inputMatches(inputBox(prompt, text), "!", "") {
+			t.Fatal("typed shell content accepted as idle")
+		}
+	}
+	if !inputMatches(inputBox(prompt, "\x1b[0mprintf"), "!", "printf") {
+		t.Fatal("exact styled pending command rejected")
 	}
 }

@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type driver struct {
@@ -92,13 +94,15 @@ func (d driver) probe(ctx context.Context, pane, script, id string) (string, err
 	return output, nil
 }
 
+var inputSGR = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
 // inputMatches accepts only the observed bounded input box. Unknown layouts
 // fail closed; a shell-mode hint elsewhere in history is never readiness.
 func inputMatches(text, prompt, want string) bool {
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 	var borders []int
 	for i, line := range lines {
-		v := strings.TrimSpace(line)
+		v := strings.TrimSpace(inputSGR.ReplaceAllString(line, ""))
 		if len([]rune(v)) >= 8 && strings.Trim(v, "─") == "" {
 			borders = append(borders, i)
 		}
@@ -111,12 +115,31 @@ func inputMatches(text, prompt, want string) bool {
 		return false
 	}
 	line := strings.TrimSpace(lines[a+1])
+	// Observed shell prompt color; do not strip styling from input content.
+	const shellColor = "\x1b[0m\x1b[38;2;253;93;177m"
+	coloredShell := prompt == "!" && strings.HasPrefix(line, shellColor)
+	if coloredShell {
+		line = strings.TrimPrefix(line, shellColor)
+	}
 	if !strings.HasPrefix(line, prompt) {
 		return false
 	}
 	rest := strings.TrimLeft(strings.TrimPrefix(line, prompt), " \u00a0")
 	if want == "" {
-		return rest == ""
+		if rest == "" {
+			return true
+		}
+		// Only the observed placeholder has this exact style.
+		// Never infer emptiness from its words in plain text or other styling.
+		const start, end = "\x1b[0m\x1b[2mTry \"", "\"\x1b[0m"
+		if (prompt != "❯" && !coloredShell) || !strings.HasPrefix(rest, start) || !strings.HasSuffix(rest, end) {
+			return false
+		}
+		label := strings.TrimSuffix(strings.TrimPrefix(rest, start), end)
+		return label != "" && !strings.ContainsRune(label, '"') && strings.IndexFunc(label, unicode.IsControl) < 0
+	}
+	if coloredShell {
+		rest = strings.TrimPrefix(rest, "\x1b[0m")
 	}
 	return rest == want
 }
@@ -125,7 +148,7 @@ func (d driver) waitInput(ctx context.Context, pane, prompt, want string) error 
 	bounded, cancel := context.WithTimeout(ctx, d.timeout)
 	defer cancel()
 	for {
-		text, err := d.call(bounded, "pane", "read", pane, "--source", "visible", "--lines", "1000", "--format", "text")
+		text, err := d.call(bounded, "pane", "read", pane, "--source", "visible", "--lines", "1000", "--format", "ansi")
 		if err != nil {
 			return err
 		}
