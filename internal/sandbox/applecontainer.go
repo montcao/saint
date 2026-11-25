@@ -170,7 +170,9 @@ func (a *AppleContainer) Create(ctx context.Context, name string, rt Runtime, re
 	}
 	args = append(args, "--volume", sessionDir+":/saint")
 
-	script, err := runtimeBootstrapScript(rt, repos[0].Path, opts)
+	// Approve only the placeholder saint supplied to its proxy.
+	approveKey := proxyURL != "" && opts.ProxyToken != "" && !subscription
+	script, err := bootstrapScript(rt, repos[0].Path, opts, approveKey)
 	if err != nil {
 		return err
 	}
@@ -306,6 +308,10 @@ const (
 )
 
 func runtimeBootstrapScript(rt Runtime, workdir string, opts CreateOptions) (string, error) {
+	return bootstrapScript(rt, workdir, opts, false)
+}
+
+func bootstrapScript(rt Runtime, workdir string, opts CreateOptions, approveKey bool) (string, error) {
 	// Deliberately `set -u` and not `set -eu`.
 	//
 	// This script is the container's init: when it exits, the container stops.
@@ -317,7 +323,7 @@ func runtimeBootstrapScript(rt Runtime, workdir string, opts CreateOptions) (str
 	// The tmux server and the agent inherit this script's environment, which
 	// has no locale at all: give them the same UTF-8 one the attach uses.
 	lines := []string{"set -u", "export LANG=" + guestLocale}
-	lines = append(lines, onboardingLines(rt, workdir)...)
+	lines = append(lines, onboardingLines(rt, workdir, approveKey)...)
 	if opts.ClaudeConfigDir != "" {
 		lines = append(lines, claudeConfigLines(rt)...)
 	}
@@ -387,17 +393,30 @@ func runtimeBootstrapScript(rt Runtime, workdir string, opts CreateOptions) (str
 // Written only when the file is absent, so a container that has accumulated
 // real state keeps it. The version is read from the guest's own claude, because
 // a newer release is entitled to ask its questions again.
-func onboardingLines(rt Runtime, workdir string) []string {
+func onboardingLines(rt Runtime, workdir string, approveKey bool) []string {
 	if rt != RuntimeClaude {
 		return nil
 	}
-	return []string{
-		`_saint_v=$(claude --version 2>/dev/null | awk '{print $1}')`,
+	lines := []string{
 		`if [ ! -f "$HOME/.claude.json" ]; then`,
-		`  printf '{"hasCompletedOnboarding":true,"lastOnboardingVersion":"%s","projects":{%s:{"hasTrustDialogAccepted":true}}}' ` +
-			`"$_saint_v" ` + shellQuote(jsonQuote(workdir)) + ` > "$HOME/.claude.json"`,
-		`fi`,
+		`  _saint_v=$(claude --version 2>/dev/null | awk '{print $1}')`,
+		`  _saint_key_response=''`,
 	}
+	if approveKey {
+		// Claude 2.1.247 recognizes the final 20 characters of the key. The
+		// proxy token is base64url; validate its suffix before writing JSON.
+		lines = append(lines,
+			`  _saint_suffix=$(printf '%s' "${ANTHROPIC_API_KEY-}" | tail -c 20)`,
+			`  case "$_saint_suffix" in ''|*[!A-Za-z0-9_-]*) ;;`,
+			`    *) _saint_key_response=$(printf ',"customApiKeyResponses":{"approved":["%s"]}' "$_saint_suffix") ;;`,
+			`  esac`,
+		)
+	}
+	return append(lines,
+		`  (umask 077; printf '{"hasCompletedOnboarding":true,"lastOnboardingVersion":"%s","projects":{%s:{"hasTrustDialogAccepted":true}}%s}' `+
+			`"$_saint_v" `+shellQuote(jsonQuote(workdir))+` "$_saint_key_response" > "$HOME/.claude.json")`,
+		`fi`,
+	)
 }
 
 // guestClaudeConfigMount is where the read-only configuration snapshot is
