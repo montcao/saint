@@ -120,6 +120,12 @@ type Config struct {
 	// install is not asked about them.
 	ClaudeTelemetryOff bool `json:"claude_telemetry_off,omitempty"`
 
+	// ShareClaudeConfig gives new Claude sessions a read-only copy of the
+	// user's Claude Code configuration and their git name and email (see
+	// internal/session/guestconfig.go). Off by default: nothing of the user's
+	// reaches a guest until they turn it on with `saint claude-config on`.
+	ShareClaudeConfig bool `json:"share_claude_config,omitempty"`
+
 	// ListStyle picks how the session list is drawn: "table" or "blocks".
 	//
 	// Empty means the table, so an existing config keeps the list it already

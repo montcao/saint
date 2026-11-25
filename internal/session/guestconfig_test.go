@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/montcao/saint/internal/sandbox"
+	"github.com/montcao/saint/internal/store"
 )
 
 func writeFile(t *testing.T, path, content string) {
@@ -28,7 +29,7 @@ func hostClaude(t *testing.T) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), ".claude")
 	writeFile(t, filepath.Join(dir, "settings.json"), `{
-		"permissions": {"allow": ["Bash(make check)"]},
+		"permissions": {"allow": ["Bash(curl -H 'Authorization: Bearer tok-fixture' https://api.example)"], "deny": ["Read(./.env)"], "defaultMode": "bypassPermissions", "additionalDirectories": ["/elsewhere"]},
 		"model": "opus",
 		"env": {"ANTHROPIC_API_KEY": "sk-ant-fixture"},
 		"apiKeyHelper": "/usr/local/bin/print-key",
@@ -56,10 +57,11 @@ func hostClaude(t *testing.T) string {
 	if err := os.Symlink(filepath.Join(outside, "id_ed25519"), filepath.Join(dir, "skills", "review", "key")); err != nil {
 		t.Fatal(err)
 	}
-	// A skill installed as a symlink to its own directory is common, and is
-	// copied.
+	// A skill installed as a symlink to a folder elsewhere is skipped: the
+	// folder's other files would cross with it.
 	linked := filepath.Join(t.TempDir(), "linked-skill")
 	writeFile(t, filepath.Join(linked, "SKILL.md"), "linked skill")
+	writeFile(t, filepath.Join(linked, "config.json"), `{"token":"linked-fixture"}`)
 	if err := os.Symlink(linked, filepath.Join(dir, "skills", "linked")); err != nil {
 		t.Fatal(err)
 	}
@@ -107,19 +109,19 @@ func TestTheGuestConfigSnapshotCopiesOnlyTheAllowlist(t *testing.T) {
 	}
 	files := snapshotFiles(t, snap.Dir)
 
-	for _, want := range []string{"settings.json", "CLAUDE.md", "skills/review/SKILL.md", "skills/review/notes/checklist.md", "skills/linked/SKILL.md", "agents/planner.md"} {
+	for _, want := range []string{"settings.json", "CLAUDE.md", "skills/review/SKILL.md", "skills/review/notes/checklist.md", "agents/planner.md"} {
 		if _, ok := files[want]; !ok {
 			t.Errorf("snapshot is missing %s; have %v", want, keys(files))
 		}
 	}
 	for name, content := range files {
-		for _, leaked := range []string{"sk-ant-fixture", "fixture key", "TOKEN=fixture", "a private prompt", "private transcript", "claudeAiOauth"} {
+		for _, leaked := range []string{"sk-ant-fixture", "fixture key", "TOKEN=fixture", "a private prompt", "private transcript", "claudeAiOauth", "tok-fixture", "linked-fixture", "bypassPermissions", "/elsewhere"} {
 			if strings.Contains(content, leaked) {
 				t.Errorf("snapshot file %s contains %q", name, leaked)
 			}
 		}
 	}
-	for _, banned := range []string{"history.jsonl", ".credentials.json", "projects/p/transcript.jsonl", "skills/notaskill/README.md", "skills/review/.env", "skills/review/deploy.pem", "skills/review/key"} {
+	for _, banned := range []string{"history.jsonl", ".credentials.json", "projects/p/transcript.jsonl", "skills/notaskill/README.md", "skills/review/.env", "skills/review/deploy.pem", "skills/review/key", "skills/linked/SKILL.md"} {
 		if _, ok := files[banned]; ok {
 			t.Errorf("snapshot contains %s", banned)
 		}
@@ -133,6 +135,13 @@ func TestTheGuestConfigSnapshotCopiesOnlyTheAllowlist(t *testing.T) {
 		if !guestSettingsKeys[key] {
 			t.Errorf("settings.json kept %q, which is not on the allowlist", key)
 		}
+	}
+	var perms map[string]json.RawMessage
+	if err := json.Unmarshal(settings["permissions"], &perms); err != nil {
+		t.Fatalf("permissions: %v", err)
+	}
+	if len(perms) != 1 || perms["deny"] == nil {
+		t.Errorf("permissions = %s; want only the deny rules", settings["permissions"])
 	}
 	for _, want := range []string{"permissions", "model"} {
 		if _, ok := settings[want]; !ok {
@@ -195,6 +204,7 @@ func TestCreateCarriesTheConfigSnapshotAndGitIdentity(t *testing.T) {
 	svc, sb, repo := newEgressService(t)
 	svc.HostClaudeDir = hostClaude(t)
 	svc.GitIdentity = func() (string, string) { return "Ada Example", "ada@example.com\nInjected: x" }
+	shareClaudeConfig(t, svc, true)
 
 	created, err := svc.Create(context.Background(), CreateRequest{Repos: []sandbox.Repo{{Path: repo}}})
 	if err != nil {
@@ -224,6 +234,37 @@ func TestCreateCarriesTheConfigSnapshotAndGitIdentity(t *testing.T) {
 	}
 }
 
+func shareClaudeConfig(t *testing.T, svc *Service, on bool) {
+	t.Helper()
+	if _, err := svc.Store.UpdateConfig(func(cfg *store.Config) error {
+		cfg.ShareClaudeConfig = on
+		return nil
+	}); err != nil {
+		t.Fatalf("UpdateConfig() error = %v", err)
+	}
+}
+
+// Least privilege: until the user turns sharing on, nothing of theirs reaches
+// a guest, neither configuration nor git identity.
+func TestCreateSharesNothingUntilTheUserTurnsItOn(t *testing.T) {
+	t.Parallel()
+
+	svc, sb, repo := newEgressService(t)
+	svc.HostClaudeDir = hostClaude(t)
+	svc.GitIdentity = func() (string, string) { return "Ada Example", "ada@example.com" }
+
+	created, err := svc.Create(context.Background(), CreateRequest{Repos: []sandbox.Repo{{Path: repo}}})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if sb.opts.ClaudeConfigDir != "" || sb.opts.GitName != "" || sb.opts.GitEmail != "" {
+		t.Errorf("Create() shared %q, %q, %q without the user turning sharing on", sb.opts.ClaudeConfigDir, sb.opts.GitName, sb.opts.GitEmail)
+	}
+	if _, err := os.Stat(filepath.Join(svc.Store.Paths().GuestConfigDir, created.ID)); !os.IsNotExist(err) {
+		t.Errorf("a snapshot was written although sharing is off: %v", err)
+	}
+}
+
 // Renewing keeps the snapshot the session was created with. A host change
 // made since then reaches new sessions, not this one, for the same reason a
 // drifted skill blocks renewal: nobody saw it for this session.
@@ -236,6 +277,7 @@ func TestRenewKeepsTheOriginalConfigSnapshot(t *testing.T) {
 	setUpRenewableSession(t, svc, home)
 	host := hostClaude(t)
 	svc.HostClaudeDir = host
+	shareClaudeConfig(t, svc, true)
 
 	snap, err := svc.snapshotClaudeConfig("abc123")
 	if err != nil {
@@ -255,5 +297,28 @@ func TestRenewKeepsTheOriginalConfigSnapshot(t *testing.T) {
 	}
 	if string(data) != "be terse" {
 		t.Errorf("renew refreshed the snapshot: CLAUDE.md = %q", data)
+	}
+}
+
+// Turning sharing off reaches a session at its next renew, not only new ones.
+func TestRenewStopsSharingOnceTheUserTurnsItOff(t *testing.T) {
+	t.Parallel()
+
+	svc, home := newSkillsService(t)
+	sb := &recordingSandbox{}
+	svc.Sandbox = sb
+	setUpRenewableSession(t, svc, home)
+	svc.HostClaudeDir = hostClaude(t)
+	svc.GitIdentity = func() (string, string) { return "Ada Example", "ada@example.com" }
+	if _, err := svc.snapshotClaudeConfig("abc123"); err != nil {
+		t.Fatalf("snapshotClaudeConfig() error = %v", err)
+	}
+	shareClaudeConfig(t, svc, false)
+
+	if _, err := svc.RenewCredential(context.Background(), "abc123"); err != nil {
+		t.Fatalf("RenewCredential() error = %v", err)
+	}
+	if sb.opts.ClaudeConfigDir != "" || sb.opts.GitName != "" {
+		t.Errorf("renew still shared %q, %q after sharing was turned off", sb.opts.ClaudeConfigDir, sb.opts.GitName)
 	}
 }

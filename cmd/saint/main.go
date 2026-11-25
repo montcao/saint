@@ -179,6 +179,8 @@ func run(ctx context.Context, args []string) error {
 		return runAllow(st, args[1:], os.Stdout)
 	case "telemetry":
 		return runTelemetry(st, args[1:], os.Stdout)
+	case "claude-config":
+		return runClaudeConfig(st, args[1:], os.Stdout)
 	case "firewall":
 		return runFirewall(ctx, st, os.Stdout, (*exec.Cmd).Run)
 	case "version":
@@ -216,6 +218,7 @@ Usage:
   saint allow [<host>]       list, or save, hosts every session may reach
   saint allow -rm <host>     remove a saved host
   saint telemetry [on|off]   allow or refuse Claude Code's own background traffic
+  saint claude-config [on|off]  share your CLAUDE.md, settings, skills and git name with new sessions (off by default)
   saint doctor               check the host, runtime, credentials and proxy
   saint firewall             let the proxy through the macOS firewall (password dialog)
   saint version              the commit this binary was built from

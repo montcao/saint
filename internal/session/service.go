@@ -195,7 +195,8 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (store.Session,
 	}
 
 	var guestConfig string
-	if session.Runtime == sandbox.RuntimeClaude {
+	var gitName, gitEmail string
+	if cfg.ShareClaudeConfig && session.Runtime == sandbox.RuntimeClaude {
 		snap, err := s.snapshotClaudeConfig(session.ID)
 		if err != nil {
 			discard()
@@ -206,7 +207,9 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (store.Session,
 			s.Logf("session %s: not copied into the guest: %s", session.ID, strings.Join(snap.Skipped, ", "))
 		}
 	}
-	gitName, gitEmail := s.gitIdentity()
+	if cfg.ShareClaudeConfig {
+		gitName, gitEmail = s.gitIdentity()
+	}
 
 	createOpts := sandbox.CreateOptions{
 		Resume:             req.Resume,

@@ -11,15 +11,23 @@ import (
 	"strings"
 )
 
-// The guest gets a frozen, filtered copy of the user's Claude Code
-// configuration, taken when the session is created, so the agent behaves the
-// way it does in the user's own terminal.
+// With sharing turned on (`saint claude-config on`; off by default, because
+// nothing of the user's crosses into a guest until they approve it), the guest
+// gets a frozen, filtered copy of the user's Claude Code configuration, taken
+// when the session is created, so the agent behaves the way it does in the
+// user's own terminal.
 //
-// Three rules decide what crosses into the guest:
+// Everything below is deny-by-default: an entry crosses only if it is on an
+// allowlist. Three rules decide what crosses:
 //
 //   - Nothing that is or holds a credential. ~/.claude.json (OAuth account,
 //     MCP servers) is never read; settings.json is reduced to an allowlist
-//     that excludes env, apiKeyHelper and every MCP and plugin key.
+//     that excludes env, apiKeyHelper and every MCP and plugin key, and of
+//     permissions only the deny rules cross: allow rules record approved
+//     commands verbatim, and an approved command can carry a token.
+//   - Nothing from outside the configuration directory. Symlinks are never
+//     followed, including a skill installed as a link to a folder elsewhere:
+//     that folder's other files would cross with it.
 //   - Nothing that runs commands on the user's behalf: hooks, status lines
 //     and plugins are dropped. Plugins can also carry MCP servers, which
 //     stay off.
@@ -62,6 +70,10 @@ var guestSettingsKeys = map[string]bool{
 // guestClaudeDirs are the directories copied from ~/.claude. Skills must
 // contain a skill file (skillFile) at their top level; the others are copied as they are.
 var guestClaudeDirs = []string{"skills", "agents", "commands", "output-styles"}
+
+// linkedReason is reported for a skipped symlinked directory, with what to
+// do to share it.
+const linkedReason = "a link to a folder elsewhere; copy it into place to share it"
 
 // skillFile marks a directory as a skill, the same test Claude Code applies.
 const skillFile = "SKILL" + ".md"
@@ -144,15 +156,42 @@ func copyFilteredSettings(src, dst string) error {
 	}
 	kept := make(map[string]json.RawMessage, len(all))
 	for key, value := range all {
-		if guestSettingsKeys[key] {
-			kept[key] = value
+		if !guestSettingsKeys[key] {
+			continue
 		}
+		if key == "permissions" {
+			deny, ok := denyRulesOnly(value)
+			if !ok {
+				continue
+			}
+			value = deny
+		}
+		kept[key] = value
 	}
 	out, err := json.MarshalIndent(kept, "", "  ")
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(dst, append(out, '\n'), 0o600)
+}
+
+// denyRulesOnly keeps only permissions.deny. Deny rules only ever restrict the
+// agent; allow rules, additional directories and the default mode widen it,
+// and allow rules hold approved commands verbatim.
+func denyRulesOnly(raw json.RawMessage) (json.RawMessage, bool) {
+	var perms map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &perms); err != nil {
+		return nil, false
+	}
+	deny, ok := perms["deny"]
+	if !ok {
+		return nil, false
+	}
+	out, err := json.Marshal(map[string]json.RawMessage{"deny": deny})
+	if err != nil {
+		return nil, false
+	}
+	return out, true
 }
 
 // readBoundedRegular reads a regular file no larger than guestConfigMaxFile,
@@ -180,12 +219,18 @@ func (c *configCopier) skip(rel, reason string) {
 	c.skipped = append(c.skipped, rel+" ("+reason+")")
 }
 
-// copyTopDir copies one allowlisted directory. The directory itself and, for
-// skills, each top-level entry may be a symlink, because that is how skills
-// are commonly installed; nothing below that level is followed.
+// copyTopDir copies one allowlisted directory. Nothing is followed through a
+// symlink, at any level: a linked directory or skill is skipped and reported.
 func (c *configCopier) copyTopDir(src, dst, rel string, skills bool) {
-	info, err := os.Stat(src)
-	if err != nil || !info.IsDir() {
+	info, err := os.Lstat(src)
+	if err != nil {
+		return
+	}
+	if info.Mode()&fs.ModeSymlink != 0 {
+		c.skip(rel, linkedReason)
+		return
+	}
+	if !info.IsDir() {
 		return
 	}
 	if !skills {
@@ -204,8 +249,15 @@ func (c *configCopier) copyTopDir(src, dst, rel string, skills bool) {
 			continue
 		}
 		path := filepath.Join(src, name)
-		target, err := os.Stat(path)
-		if err != nil || !target.IsDir() {
+		target, err := os.Lstat(path)
+		if err != nil {
+			continue
+		}
+		if target.Mode()&fs.ModeSymlink != 0 {
+			c.skip(entryRel, linkedReason)
+			continue
+		}
+		if !target.IsDir() {
 			continue
 		}
 		if skill, err := os.Lstat(filepath.Join(path, skillFile)); err != nil || !skill.Mode().IsRegular() {
