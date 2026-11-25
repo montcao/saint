@@ -21,6 +21,20 @@ choose. Do not quietly pick for them.
 
 ## Rules that have earned their place
 
+**Least privilege, and deny unless the user approves.** A guest starts with
+nothing it was not given: no network beyond the shipped allowlist, no credential
+it does not need, no file of the user's beyond what they chose to mount, and
+none of their configuration. Every widening is something the user approves,
+explicitly, at the place it is chosen, with what it exposes stated there.
+Examples: a host nobody has ruled on is asked about and refused when nobody
+answers, and `saint allow` saves one; sharing the user's Claude Code setup with
+sessions is off until they turn it on; anything that would let a guest act with
+the user's own keys, such as SSH agent forwarding, starts off. Within anything
+approved, the
+same rule repeats: what crosses is an allowlist, and anything new or unknown
+stays out until someone decides it is safe. This is what lets a user scope each
+session's work securely: a session can do what they approved and nothing else.
+
 **Never show an invented number.** An unknown is `unknown`. saint has a context
 bar with no percentage for models whose window is unverified, a `tokens=unreported`
 state for providers that send no counters, and a `no git` state for directories
