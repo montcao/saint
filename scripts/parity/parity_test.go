@@ -174,3 +174,36 @@ func TestDecoratedOutputStrictlyBounded(t *testing.T) {
 		}
 	}
 }
+
+func TestCompactProbePreservesFramingAndStatus(t *testing.T) {
+	id := "0123456789abcdef01234567"
+	for _, script := range []string{`printf "alpha\nbeta\n"`, `printf "execution-%s\n" "$0"`} {
+		command := probeCommand("", script, id)
+		// Synthetic 151-column viewport: prompt takes two cells. This budget is
+		// not a runtime assumption; exact visible-input checks still gate Enter.
+		if len(command) > 149 {
+			t.Fatalf("compact diagnostic too long: %d", len(command))
+		}
+		if strings.Contains(command, "SAINT_PARITY_"+id+"_BEGIN") || strings.Contains(command, "SAINT_PARITY_"+id+"_END") {
+			t.Fatal("echo contains complete marker")
+		}
+		data, err := exec.CommandContext(t.Context(), "sh", "-c", command).Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := extract(string(data), id)
+		if err != nil || got == "" {
+			t.Fatalf("output=%q err=%v", got, err)
+		}
+	}
+	for _, script := range []string{"exit 7", "false", "exit 255"} {
+		command := probeCommand("", script, id)
+		data, err := exec.CommandContext(t.Context(), "sh", "-c", command).Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := extract(string(data), id); err == nil {
+			t.Fatal("nonzero payload accepted")
+		}
+	}
+}

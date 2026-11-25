@@ -36,7 +36,7 @@ func TestWrappedPendingInputStopsSubmission(t *testing.T) {
 		{"missing wrapped text", strings.Replace(fixture.Screen, "alpha", "", 1)},
 		{"extra wrapped text", strings.Replace(fixture.Screen, "alpha", "alpha extra", 1)},
 		{"missing continuation", strings.Split(fixture.Screen, "\n  _saint_rc")[0]},
-		{"genuine newline", inputBox("!", strings.Replace(command, "; (", ";\n (", 1))},
+		{"genuine newline", inputBox("!", strings.Replace(command, ";(", ";\n(", 1))},
 		{"ambiguous indentation", strings.Replace(fixture.Screen, "\n  _saint_rc", "\n _saint_rc", 1)},
 		{"extra row", strings.Replace(fixture.Screen, "\n  _saint_rc", "\nextra\n  _saint_rc", 1)},
 		{"altered unwrapped", strings.Replace(exact, "alpha", "other", 1)},

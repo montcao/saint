@@ -51,8 +51,8 @@ var manualProbes = []string{
 func preflight(ctx context.Context, d driver, host, saint string) error {
 	for _, side := range []struct{ name, pane string }{{"host", host}, {"saint", saint}} {
 		id := nonce()
-		want := "execution-" + id
-		got, err := d.probe(ctx, side.pane, "printf '%s%s\\n' 'execution-' "+quote(id), id)
+		want := "execution-SAINT_PARITY_" + id
+		got, err := d.probe(ctx, side.pane, `printf "execution-%s\n" "$0"`, id)
 		if err != nil {
 			return fmt.Errorf("%s preflight: %s; remaining submissions stopped", side.name, failureDetail(err))
 		}

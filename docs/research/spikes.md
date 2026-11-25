@@ -458,7 +458,7 @@ not structured input state or a security boundary against a malicious terminal.
 Operators must still confirm idle state and inspect for model handling. Dedicated shell
 panes with an empty prefix skip agent UI checks and do not establish agent parity.
 
-Wrapped pending input remains a live-verification blocker. In the captured
+Wrapped pending input is rejected. In the captured
 synthetic case, herdr 0.9.5 returned the same two ANSI input rows for `visible`
 and `recent-unwrapped`; the latter did not expose a single logical input line.
 The public [read result](https://github.com/herdrdev/herdr/blob/v0.9.5/src/api/schema/panes.rs)
@@ -467,8 +467,15 @@ application-rendered rows by indentation or apparent width: a genuine newline
 can be indistinguishable. The synthetic fixture preserves that layout and
 regression tests require no submission for ambiguous, altered, missing or
 extra input, including extra leading or trailing spaces. Pending command
-comparison removes only the prompt separator and observed style prefix. Host execution, guest execution and preflight remain gated until
-a reliable logical input representation or wrap provenance is available.
+comparison removes only the prompt separator and observed style prefix. Longer
+commands remain gated until a reliable logical input representation or
+wrap provenance is available. Diagnostics avoid that ambiguity by passing the
+frame stem once as `sh -c`'s `$0`; each marker is still assembled at execution.
+The payload runs in a subshell and its status is expanded directly into the
+end marker. Preflight derives its expected value from that same unique stem.
+The compact two-line demonstration and preflight fit the observed test width;
+this is not a minimum-width assumption. Exact styled input checks must still
+pass on each pane before Enter, and wrapping is never joined heuristically.
 
 Output parsing accepts plain anchored frames or exactly one observed `⎿`
 prefix (two leading spaces, then two spaces or space plus NBSP after the glyph)

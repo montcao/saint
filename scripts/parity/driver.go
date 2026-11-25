@@ -45,8 +45,9 @@ func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'")
 // Probe output stays between unique markers; an explicit exit code prevents two
 // identical failures from counting as parity.
 func probeCommand(prefix, script, id string) string {
-	body := "printf '\\n%s%s\\n' 'SAINT_' " + quote("PARITY_"+id+"_BEGIN") + "; ( " + script + " ); _saint_rc=$?; printf '\\n%s%s:%s\\n' 'SAINT_' " + quote("PARITY_"+id+"_END") + " \"$_saint_rc\""
-	return prefix + "sh -c " + quote(body)
+	// Reserve $0 for the frame stem so it is quoted and transmitted only once.
+	body := `printf "\n%s_BEGIN\n" "$0";(` + script + `);printf "\n%s_END:%s\n" "$0" "$?"`
+	return prefix + "sh -c " + quote(body) + " " + quote("SAINT_PARITY_"+id)
 }
 
 // Read back each input transition; transport acknowledgement is not readiness.
