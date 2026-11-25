@@ -11,46 +11,49 @@ import (
 	"time"
 )
 
-// Execute actual framed commands only at the ordered submission boundary.
-// Raw text admission and key events alone must never execute a command.
-// A real agent's interpretation of key events still requires a Mac test.
+// Model input transitions and execute only after an inspected pending command
+// receives Enter. This models a synthetic UI, never real agent routing.
+func inputBox(prompt, text string) string {
+	return "────────\n" + prompt + " " + text + "\n────────\n"
+}
 func shellRunner(t *testing.T, failPane string, sent *[]string) runner {
 	t.Helper()
-	outputs := map[string]string{}
-	pending := map[string]string{}
+	outputs, pending, modes := map[string]string{}, map[string]string{}, map[string]string{}
 	return func(ctx context.Context, _ string, args ...string) (string, error) {
 		if args[0] == "--version" {
 			return "fixture", nil
 		}
 		pane := args[2]
+		if modes[pane] == "" {
+			modes[pane] = "❯"
+		}
 		switch args[1] {
 		case "send-text":
 			pending[pane] += args[3]
 		case "send-keys":
-			// Model raw text still buffered when Enter arrives: transport
-			// acknowledgement alone neither flushes nor executes it.
-			if args[3] == "!" && pending[pane] != "" {
-				return "", errors.New("input is not empty")
+			if args[3] == "!" {
+				if pending[pane] != "" {
+					return "", errors.New("input is not empty")
+				}
+				modes[pane] = "!"
+			} else if args[3] == "Enter" {
+				if !strings.HasPrefix(pending[pane], "sh -c ") {
+					t.Fatal("unexpected synthetic command")
+				}
+				*sent = append(*sent, pane)
+				if pane == failPane {
+					outputs[pane] = "private model prose"
+				} else {
+					data, err := exec.CommandContext(ctx, "sh", "-c", pending[pane]).CombinedOutput()
+					if err != nil {
+						t.Fatal(err)
+					}
+					outputs[pane] = string(data)
+				}
+				pending[pane], modes[pane] = "", "❯"
 			}
-		case "run":
-			if !strings.HasPrefix(args[3], "sh -c ") {
-				t.Fatal("unexpected command outside synthetic shell fixture")
-			}
-			if pending[pane] != "" {
-				return "", errors.New("input is not empty")
-			}
-			*sent = append(*sent, pane)
-			if pane == failPane {
-				outputs[pane] = "private model prose"
-				return "{}", nil
-			}
-			data, err := exec.CommandContext(ctx, "sh", "-c", args[3]).CombinedOutput()
-			if err != nil {
-				t.Fatal(err)
-			}
-			outputs[pane] = string(data)
 		case "read":
-			return outputs[pane], nil
+			return outputs[pane] + inputBox(modes[pane], pending[pane]), nil
 		}
 		return "{}", nil
 	}
@@ -120,25 +123,6 @@ func TestPreflightFailureSavesUnverifiedReportWithoutComparisons(t *testing.T) {
 		})
 	}
 }
-func TestProbeFailureStagesDoNotLeakRunnerErrors(t *testing.T) {
-	stages := []string{"shell-mode key", "submit command", "wait-output", "read"}
-	for failAt, stage := range stages {
-		t.Run(stage, func(t *testing.T) {
-			calls := 0
-			d := driver{timeout: time.Second, prefix: "!", run: func(context.Context, string, ...string) (string, error) {
-				calls++
-				if calls == failAt+1 {
-					return "private output", errors.New("secret argv")
-				}
-				return "{}", nil
-			}}
-			_, err := d.probe(t.Context(), "host", "true", "fixture")
-			if err == nil || failureDetail(err) != stage+": command failed" || calls != failAt+1 {
-				t.Fatalf("%v calls=%d", err, calls)
-			}
-		})
-	}
-}
 func TestComparisonStopsAfterFramingFailure(t *testing.T) {
 	for _, fail := range []string{"host", "saint"} {
 		var sent []string
@@ -202,7 +186,7 @@ func TestFailedFirstPairPreventsFurtherCreation(t *testing.T) {
 			case "pane":
 				return `{"result":{"plugin_pane":{"pane":{"pane_id":"saint"}}}}`, nil
 			case "read":
-				if len(sent) == 0 {
+				if len(sent) == 0 && strings.Contains(strings.Join(args, " "), "recent-unwrapped") {
 					return "ready", nil
 				}
 			}
@@ -229,65 +213,124 @@ func TestProbeRejectsRPCErrorAndClassifiesTimeout(t *testing.T) {
 			calls := 0
 			d := driver{timeout: time.Second, run: func(context.Context, string, ...string) (string, error) { calls++; return tc.raw, tc.err }}
 			_, err := d.probe(t.Context(), "host", "true", "fixture")
-			if err == nil || err.Error() != "submit command: "+tc.reason || calls != 1 {
+			if err == nil || err.Error() != "enter command: "+tc.reason || calls != 1 {
 				t.Fatalf("%v calls=%d", err, calls)
 			}
 		})
 	}
 }
 
-func TestRawTextAndEnterDoNotExecuteBufferedCommand(t *testing.T) {
-	var sent []string
-	run := shellRunner(t, "", &sent)
-	for _, args := range [][]string{
-		{"pane", "send-keys", "host", "!"},
-		{"pane", "send-text", "host", probeCommand("", "printf harmless", "fixture")},
-		{"pane", "send-keys", "host", "Enter"},
+func TestInputChecksFailClosed(t *testing.T) {
+	for _, tc := range []struct{ name, screen string }{
+		{"pending", inputBox("❯", "do something")},
+		{"wrong mode", inputBox("!", "")},
+		{"history hint", "! for shell mode\n"},
+		{"multiline", "────────\n❯ one\ntwo\n────────\n"},
 	} {
-		if _, err := run(t.Context(), "herdr", args...); err != nil {
-			t.Fatal(err)
-		}
-	}
-	output, err := run(t.Context(), "herdr", "pane", "read", "host")
-	if err != nil || output != "" || len(sent) != 0 {
-		t.Fatalf("executed unsubmitted text: %q %v %v", output, err, sent)
-	}
-	// A retry must not silently append to the still-pending input.
-	if _, err := run(t.Context(), "herdr", "pane", "run", "host", probeCommand("", "true", "retry")); err == nil {
-		t.Fatal("accepted pending input")
-	}
-}
-
-func TestAcknowledgedSubmissionWithoutOutputStopsBeforeGuest(t *testing.T) {
-	var submitted []string
-	d := driver{timeout: time.Second, prefix: "!", run: func(_ context.Context, _ string, args ...string) (string, error) {
-		if args[2] != "host" {
-			t.Fatal("touched guest after failed host submission")
-		}
-		switch args[1] {
-		case "run":
-			submitted = append(submitted, args[2])
-		case "wait-output":
-			return "", context.DeadlineExceeded
-		}
-		return "{}", nil
-	}}
-	err := preflight(t.Context(), d, "host", "guest")
-	if err == nil || !strings.Contains(err.Error(), "host preflight: wait-output: timed out") || len(submitted) != 1 {
-		t.Fatalf("%v %v", err, submitted)
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			d := driver{timeout: time.Millisecond, prefix: "!", run: func(_ context.Context, _ string, args ...string) (string, error) {
+				if args[1] != "read" {
+					t.Fatal("submitted into uncertain input")
+				}
+				calls++
+				return tc.screen, nil
+			}}
+			err := preflight(t.Context(), d, "host", "guest")
+			if err == nil || !strings.Contains(err.Error(), "idle input: timed out") || calls == 0 {
+				t.Fatalf("%v", err)
+			}
+		})
 	}
 }
 
-func TestShellKeyFailurePreventsSubmission(t *testing.T) {
+func TestTransitionFailureStopsBeforeSubmission(t *testing.T) {
+	for _, stage := range []string{"shell input", "pending input", "return to idle"} {
+		t.Run(stage, func(t *testing.T) {
+			var sent []string
+			base := shellRunner(t, "", &sent)
+			triggered, entered, submitted := false, false, false
+			d := driver{timeout: 100 * time.Millisecond, prefix: "!", run: func(ctx context.Context, bin string, args ...string) (string, error) {
+				if args[2] != "host" {
+					t.Fatal("touched guest")
+				}
+				if args[1] == "send-keys" && args[3] == "!" {
+					triggered = true
+				}
+				if args[1] == "send-text" {
+					entered = true
+				}
+				if args[1] == "send-keys" && args[3] == "Enter" {
+					submitted = true
+				}
+				if args[1] == "read" && ((stage == "shell input" && triggered) || (stage == "pending input" && entered) || (stage == "return to idle" && submitted)) {
+					if stage == "return to idle" {
+						text, err := base(ctx, bin, args...)
+						return strings.ReplaceAll(text, inputBox("❯", ""), inputBox("❯", "pending")), err
+					}
+					return inputBox("❯", "uncertain"), nil
+				}
+				return base(ctx, bin, args...)
+			}}
+			err := preflight(t.Context(), d, "host", "guest")
+			if err == nil || !strings.Contains(err.Error(), stage+": timed out") {
+				t.Fatalf("%v", err)
+			}
+			if stage != "return to idle" && submitted {
+				t.Fatal("submitted after failed transition")
+			}
+		})
+	}
+}
+
+func TestInputObservationUsesVisibleStateAndCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
 	calls := 0
-	d := driver{timeout: time.Second, prefix: "!", run: func(_ context.Context, _ string, args ...string) (string, error) {
+	d := driver{timeout: time.Second, run: func(_ context.Context, _ string, args ...string) (string, error) {
 		calls++
-		if args[1] != "send-keys" || args[3] != "!" {
-			t.Fatal("submitted without shell-mode trigger")
+		if args[1] != "read" || args[4] != "visible" {
+			t.Fatal("readiness used history or mutated pane")
 		}
-		return "", errors.New("unavailable")
+		cancel()
+		return "unknown layout", nil
 	}}
-	if err := preflight(t.Context(), d, "host", "guest"); err == nil || calls != 1 {
+	if err := d.waitInput(ctx, "host", "❯", ""); !errors.Is(err, context.Canceled) || calls != 1 {
 		t.Fatalf("%v calls=%d", err, calls)
+	}
+}
+
+func TestInputObservationWaitsForExactPendingCommand(t *testing.T) {
+	calls := 0
+	d := driver{timeout: time.Second, run: func(_ context.Context, _ string, args ...string) (string, error) {
+		calls++
+		if calls == 1 {
+			return inputBox("!", "partial"), nil
+		}
+		return inputBox("!", "printf complete"), nil
+	}}
+	if err := d.waitInput(t.Context(), "host", "!", "printf complete"); err != nil || calls != 2 {
+		t.Fatalf("%v calls=%d", err, calls)
+	}
+}
+
+func TestTransitionErrorsRemainSanitized(t *testing.T) {
+	stages := []string{"idle input", "shell-mode key", "shell input", "enter command", "pending input", "submit command", "wait-output", "read", "return to idle"}
+	for failAt, stage := range stages {
+		t.Run(stage, func(t *testing.T) {
+			var sent []string
+			base := shellRunner(t, "", &sent)
+			calls := 0
+			d := driver{timeout: time.Second, prefix: "!", run: func(ctx context.Context, bin string, args ...string) (string, error) {
+				calls++
+				if calls == failAt+1 {
+					return "private screen", errors.New("private argv")
+				}
+				return base(ctx, bin, args...)
+			}}
+			_, err := d.probe(t.Context(), "host", "printf harmless", "fixture")
+			if err == nil || failureDetail(err) != stage+": command failed" || calls != failAt+1 {
+				t.Fatalf("%v calls=%d", err, calls)
+			}
+		})
 	}
 }

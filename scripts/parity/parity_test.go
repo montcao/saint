@@ -49,35 +49,21 @@ func TestExtractionRejectsFailuresEchoAndMissingOutput(t *testing.T) {
 		}
 	}
 }
-func TestDriverUsesShellKeyAndOrderedSubmission(t *testing.T) {
-	t.Parallel()
-	var calls [][]string
-	d := driver{bin: "herdr", timeout: time.Second, prefix: "!", run: func(ctx context.Context, bin string, args ...string) (string, error) {
-		if _, ok := ctx.Deadline(); !ok {
-			t.Error("unbounded command")
-		}
-		calls = append(calls, args)
-		if args[1] == "read" {
-			return "SAINT_PARITY_x_BEGIN\nvalue\n\nSAINT_PARITY_x_END:0\n", nil
-		}
-		return "{}", nil
+func TestDriverChecksEveryInputTransition(t *testing.T) {
+	var calls []string
+	var sent []string
+	base := shellRunner(t, "", &sent)
+	d := driver{timeout: time.Second, prefix: "!", run: func(ctx context.Context, bin string, args ...string) (string, error) {
+		calls = append(calls, args[1])
+		return base(ctx, bin, args...)
 	}}
-	got, err := d.probe(t.Context(), "w:p", "printf value", "x")
+	got, err := d.probe(t.Context(), "host", "printf value", "fixture")
 	if err != nil || got != "value" {
 		t.Fatalf("%q %v", got, err)
 	}
-	var verbs []string
-	for _, call := range calls {
-		verbs = append(verbs, call[1])
-		if call[2] != "w:p" {
-			t.Fatal("wrong pane")
-		}
-	}
-	if !reflect.DeepEqual(verbs, []string{"send-keys", "run", "wait-output", "read"}) {
-		t.Fatalf("%v", verbs)
-	}
-	if calls[0][3] != "!" || !strings.HasPrefix(calls[1][3], "sh -c ") {
-		t.Fatal("missing shell prefix")
+	want := []string{"read", "send-keys", "read", "send-text", "read", "send-keys", "wait-output", "read", "read"}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("%v", calls)
 	}
 }
 func TestDriverStopsAfterCommandFailure(t *testing.T) {
@@ -160,5 +146,31 @@ func TestOpenUsesHerdrResponseShapes(t *testing.T) {
 	want := []string{"pane split", "pane run", "pane wait-output", "pane read", "plugin pane", "pane wait-output", "pane read"}
 	if !reflect.DeepEqual(verbs, want) {
 		t.Fatalf("%v", verbs)
+	}
+}
+
+func TestDecoratedOutputStrictlyBounded(t *testing.T) {
+	for _, prefix := range []string{"  ⎿  ", "  ⎿  "} {
+		text := prefix + "SAINT_PARITY_x_BEGIN\n     first\n       second\n\n     SAINT_PARITY_x_END:0\n"
+		got, err := extract(text, "x")
+		if err != nil || got != "first\n  second" {
+			t.Fatalf("%q %v", got, err)
+		}
+	}
+	for _, text := range []string{
+		"  ⎿  " + "  ⎿  SAINT_PARITY_x_BEGIN\n     a\n     SAINT_PARITY_x_END:0",
+		"SAINT_PARITY_x_END:0\nSAINT_PARITY_x_BEGIN\na\nSAINT_PARITY_x_END:0",
+		"SAINT_PARITY_x_BEGIN\na\n  ⎿  SAINT_PARITY_x_END:0",
+		"  ⎿  SAINT_PARITY_x_BEGIN\na\n     SAINT_PARITY_x_END:0",
+		"  ⎿  SAINT_PARITY_x_BEGIN\n     a\n     SAINT_PARITY_x_END:+0",
+		"  ⎿  SAINT_PARITY_x_BEGIN\n     a\n     SAINT_PARITY_x_END:00",
+		"SAINT_PARITY_x_BEGIN\na\nSAINT_PARITY_x_END:0\nSAINT_PARITY_x_END:0",
+		"  ⎿  SAINT_PARITY_x_BEGIN\n     SAINT_PARITY_x_BEGIN\n     SAINT_PARITY_x_END:0",
+		"quoted SAINT_PARITY_x_BEGIN\na\nSAINT_PARITY_x_END:0",
+		"  ⎿  SAINT_PARITY_other_BEGIN\n     a\n     SAINT_PARITY_other_END:0",
+	} {
+		if _, err := extract(text, "x"); err == nil {
+			t.Fatalf("accepted malformed frame %q", text)
+		}
 	}
 }

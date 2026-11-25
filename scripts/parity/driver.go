@@ -47,17 +47,29 @@ func probeCommand(prefix, script, id string) string {
 	return prefix + "sh -c " + quote(body)
 }
 
-// Send the shell-mode trigger as a key event, not part of a bracketed paste.
+// Read back each input transition; transport acknowledgement is not readiness.
 func (d driver) probe(ctx context.Context, pane, script, id string) (string, error) {
+	command := probeCommand("", script, id)
 	if d.prefix != "" {
+		if err := d.waitInput(ctx, pane, "❯", ""); err != nil {
+			return "", commandFailure("idle input", err)
+		}
 		if _, err := d.call(ctx, "pane", "send-keys", pane, d.prefix); err != nil {
 			return "", commandFailure("shell-mode key", err)
 		}
+		if err := d.waitInput(ctx, pane, "!", ""); err != nil {
+			return "", commandFailure("shell input", err)
+		}
 	}
-	// pane run uses the terminal's negotiated paste framing and submits text
-	// and encoded Enter together. send-text writes raw bytes; a subsequent
-	// Enter can be consumed by the agent's paste/input buffering instead.
-	if _, err := d.call(ctx, "pane", "run", pane, probeCommand("", script, id)); err != nil {
+	if _, err := d.call(ctx, "pane", "send-text", pane, command); err != nil {
+		return "", commandFailure("enter command", err)
+	}
+	if d.prefix != "" {
+		if err := d.waitInput(ctx, pane, "!", command); err != nil {
+			return "", commandFailure("pending input", err)
+		}
+	}
+	if _, err := d.call(ctx, "pane", "send-keys", pane, "Enter"); err != nil {
 		return "", commandFailure("submit command", err)
 	}
 	end := "SAINT_PARITY_" + id + "_END:"
@@ -68,34 +80,139 @@ func (d driver) probe(ctx context.Context, pane, script, id string) (string, err
 	if err != nil {
 		return "", commandFailure("read", err)
 	}
-	return extract(text, id)
+	output, err := extract(text, id)
+	if err != nil {
+		return "", err
+	}
+	if d.prefix != "" {
+		if err := d.waitInput(ctx, pane, "❯", ""); err != nil {
+			return "", commandFailure("return to idle", err)
+		}
+	}
+	return output, nil
 }
-func extract(text, id string) (string, error) {
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	begin := "SAINT_PARITY_" + id + "_BEGIN"
-	end := "SAINT_PARITY_" + id + "_END:"
-	lines := strings.Split(text, "\n")
-	start := -1
+
+// inputMatches accepts only the observed bounded input box. Unknown layouts
+// fail closed; a shell-mode hint elsewhere in history is never readiness.
+func inputMatches(text, prompt, want string) bool {
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	var borders []int
 	for i, line := range lines {
+		v := strings.TrimSpace(line)
+		if len([]rune(v)) >= 8 && strings.Trim(v, "─") == "" {
+			borders = append(borders, i)
+		}
+	}
+	if len(borders) < 2 {
+		return false
+	}
+	a, b := borders[len(borders)-2], borders[len(borders)-1]
+	if b != a+2 {
+		return false
+	}
+	line := strings.TrimSpace(lines[a+1])
+	if !strings.HasPrefix(line, prompt) {
+		return false
+	}
+	rest := strings.TrimLeft(strings.TrimPrefix(line, prompt), " \u00a0")
+	if want == "" {
+		return rest == "" || (strings.HasPrefix(rest, "Try \"") && strings.HasSuffix(rest, "\""))
+	}
+	return rest == want
+}
+
+func (d driver) waitInput(ctx context.Context, pane, prompt, want string) error {
+	bounded, cancel := context.WithTimeout(ctx, d.timeout)
+	defer cancel()
+	for {
+		text, err := d.call(bounded, "pane", "read", pane, "--source", "visible", "--lines", "1000", "--format", "text")
+		if err != nil {
+			return err
+		}
+		if inputMatches(text, prompt, want) {
+			return nil
+		}
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-bounded.Done():
+			timer.Stop()
+			return bounded.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func extract(text, id string) (string, error) {
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	begin, end := "SAINT_PARITY_"+id+"_BEGIN", "SAINT_PARITY_"+id+"_END:"
+	start, finish := -1, -1
+	decorated := false
+	var output []string
+	code := -1
+	for i, raw := range lines {
+		line := raw
+		isDecorated := strings.HasPrefix(raw, "  ⎿  ") || strings.HasPrefix(raw, "  ⎿  ")
+		if isDecorated {
+			if strings.HasPrefix(raw, "  ⎿  ") {
+				line = strings.TrimPrefix(raw, "  ⎿  ")
+			} else {
+				line = strings.TrimPrefix(raw, "  ⎿  ")
+			}
+		}
 		if line == begin {
 			if start != -1 {
 				return "", &probeFailure{"framing", "duplicate begin marker"}
 			}
-			start = i + 1
+			start, decorated = i, isDecorated
 			continue
 		}
-		if strings.HasPrefix(line, end) && start >= 0 {
-			code, err := strconv.Atoi(strings.TrimPrefix(line, end))
-			if err != nil || code < 0 || code > 255 {
+		if start < 0 {
+			if strings.HasPrefix(strings.TrimPrefix(line, "     "), end) {
+				return "", &probeFailure{"framing", "end before begin"}
+			}
+			continue
+		}
+		if isDecorated {
+			if finish >= 0 && !strings.HasPrefix(line, end) {
+				continue
+			}
+			return "", &probeFailure{"framing", "unexpected decorated line"}
+		}
+		if decorated && !isDecorated && raw != "" {
+			if !strings.HasPrefix(raw, "     ") {
+				if finish < 0 {
+					return "", &probeFailure{"framing", "inconsistent decoration"}
+				}
+			} else {
+				line = strings.TrimPrefix(raw, "     ")
+			}
+		}
+		if line == begin {
+			return "", &probeFailure{"framing", "duplicate begin marker"}
+		}
+		if strings.HasPrefix(line, end) {
+			if finish != -1 {
+				return "", &probeFailure{"framing", "duplicate end marker"}
+			}
+			value := strings.TrimPrefix(line, end)
+			n, err := strconv.Atoi(value)
+			if err != nil || n < 0 || n > 255 || strconv.Itoa(n) != value {
 				return "", &probeFailure{"framing", "invalid exit status"}
 			}
-			if code != 0 {
-				return "", &probeFailure{"exit", fmt.Sprintf("status %d", code)}
-			}
-			return strings.TrimSuffix(strings.Join(lines[start:i], "\n"), "\n"), nil
+			finish, code = i, n
+			continue
+		}
+		if finish < 0 {
+			output = append(output, line)
 		}
 	}
-	return "", &probeFailure{"framing", "complete probe output not found"}
+	if start < 0 || finish < 0 {
+		return "", &probeFailure{"framing", "complete probe output not found"}
+	}
+	if code != 0 {
+		return "", &probeFailure{"exit", fmt.Sprintf("status %d", code)}
+	}
+	return strings.TrimSuffix(strings.Join(output, "\n"), "\n"), nil
 }
 
 // paneID accepts the documented JSON response envelope, never arbitrary text

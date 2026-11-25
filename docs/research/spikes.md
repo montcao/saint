@@ -291,7 +291,7 @@ through the wrapper.
 
 ## Pane parity harness: baseline not accepted
 
-`make parity` drives host and saint panes with herdr pane run, send-keys,
+`make parity` drives host and saint panes with herdr send-text, send-keys,
 wait-output and read. Arguments and response envelopes follow herdr 0.9.5.
 The first [Mac attempt](https://github.com/montcao/saint/issues/35#issuecomment-7162904332)
 on 2026-11-25 used harness commit `5dc0daf` and an older installed plugin
@@ -363,7 +363,8 @@ Ctrl-C cancels outstanding CLI calls; panes already created remain available.
 
 Each automated probe requires uniquely framed output and exit status zero on
 both sides. Reports identify the failing side and stage (shell-mode key,
-ordered command submission, wait-output, readback, framing or exit status)
+idle input, shell input, pending input, command entry/submission, wait-output,
+readback, return to idle, framing or exit status)
 without retaining pane contents or raw command errors. Transport or framing
 failure stops subsequent submissions and leaves remaining probes NOT VERIFIED;
 a framed nonzero exit is a probe failure and permits the next probe.
@@ -419,11 +420,51 @@ printed harness status and the outer command status. Driving panes is refused on
 offline evaluation and unit tests do not establish a Mac baseline. Record the
 first real Mac run and observations here before treating parity as accepted.
 
-The submission path sends the shell-mode trigger as a key event, then uses
-`herdr pane run` for paste-aware text and encoded Enter in one submission.
-`pane send-text` writes raw bytes in herdr 0.9.5; a separate Enter is not an
-application-level submission guarantee. Ordered submission is also not proof
-of shell-only routing. Confirm shell-mode support and empty idle input before
-running the one-pair preflight, then inspect both panes locally. Do not retry
-or send another Enter after a failure: retained input may still be pending.
-The revised submission path still requires a separately authorized live check.
+### Explicit diagnostic configuration and bounded input checks
+
+Claude's shell mode can execute a command directly and then produce a model
+reply. The documented `respondToBashCommands` default is `true`; a reply alone
+does not prove shell-mode entry failed. A host-only stepwise check with Claude
+2.1.332 and this explicit **task-local** `.claude/settings.local.json` override
+executed a harmless printf and returned to empty input without an observed
+reply, including a delayed readback:
+
+```json
+{"respondToBashCommands": false}
+```
+
+This override changes the diagnostic configuration and must be recorded. It
+is not silently installed by the harness; do not edit global settings. Output
+still enters conversation context, and absence of a visible reply is not a
+network audit. Check support and effective behavior on each installed agent;
+the older guest has not been verified. Do not assume a JSON key being present
+means the runtime honors it. See the official [shell-mode documentation](https://code.claude.com/docs/en/interactive-mode)
+and [settings reference](https://code.claude.com/docs/en/settings-reference#respondtobashcommands).
+
+Before each command, the harness polls the **visible** input box for empty
+ordinary input, sends the shell-mode key, polls for empty shell input, enters
+text, checks the exact pending command, and only then sends Enter. It checks
+return to empty ordinary input after extracting output. Each poll is bounded
+by `-timeout` and cancellation. Unknown borders, wrapping, prompt glyphs or
+nonmatching content fail closed, without retrying input. The supported
+single-row box and `Try "..."` placeholder are observations of one host UI,
+not a universal agent protocol or proof of no background work. Operators must
+still confirm idle state and inspect for model handling. Dedicated shell
+panes with an empty prefix skip agent UI checks and do not establish agent parity.
+
+Output parsing accepts plain anchored frames or exactly one observed `⎿`
+prefix (two leading spaces, then two spaces or space plus NBSP after the glyph)
+on the begin line, with exactly five decoration spaces on subsequent nonempty
+lines. It preserves payload indentation beyond those five spaces. Duplicate,
+out-of-order, mixed or malformed frames are rejected; arbitrary whitespace
+and model prose are not normalized into a pass. This is rendering support,
+not evidence that a model never handled the command.
+
+Next Mac verification: with explicit diagnostic settings, first exercise one
+framed command producing multiple lines on a fresh host and guest, inspecting
+every input step and checking older-guest support rather than assuming it.
+Stop on a model reply or any failure. Only after both sides succeed, run one
+revised preflight; only after that succeeds, run the baseline. Keep unperformed
+manual checks null. Existing retained panes may contain pending text and must
+not be reused without inspection. No guest verification, network audit or
+passing harness result is claimed by the host-only observation or unit tests.
