@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/montcao/saint/internal/claudeimage"
 	"github.com/montcao/saint/internal/credential"
 	"github.com/montcao/saint/internal/doctor"
 	"github.com/montcao/saint/internal/inventory"
@@ -87,6 +88,7 @@ func run(ctx context.Context, args []string) error {
 	}
 
 	sb := sandbox.NewAppleContainer(containerPath, logger.Printf)
+	sb.ClaudeImages = &claudeimage.Manager{Container: containerPath, LockDir: filepath.Join(st.Paths().Root, "image-locks"), Progress: os.Stderr}
 	kc := keychain.New(systemSecurityPath, logger.Printf)
 	inspector := inventory.NewRepoInspector(gitPath, logger.Printf)
 	// Sessions created before tokens moved out of the mounted session directory

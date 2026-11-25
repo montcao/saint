@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/montcao/saint/internal/claudeimage"
 	"github.com/montcao/saint/internal/credential"
 	"github.com/montcao/saint/internal/sandbox"
 	"github.com/montcao/saint/internal/store"
@@ -262,6 +263,19 @@ func (s *Service) RenewCredential(ctx context.Context, id string) (store.Session
 		return store.Session{}, err
 	}
 
+	if session.AgentVersion != "" {
+		verifier, ok := s.Sandbox.(interface {
+			VerifyClaude(context.Context, claudeimage.Selection) error
+		})
+		if !ok {
+			return store.Session{}, fmt.Errorf("not renewing: sandbox cannot verify the retained Claude image")
+		}
+		{
+			if err := verifier.VerifyClaude(ctx, claudeimage.Selection{Version: session.AgentVersion, Digest: session.ImageDigest, Architecture: session.GuestArchitecture, Recipe: session.ImageRecipe, Image: session.Image}); err != nil {
+				return store.Session{}, fmt.Errorf("not renewing: %w", err)
+			}
+		}
+	}
 	name := containerName(session.ID)
 	if err := s.Sandbox.Remove(ctx, name); err != nil {
 		return store.Session{}, fmt.Errorf("replace container: %w", err)
@@ -279,6 +293,8 @@ func (s *Service) RenewCredential(ctx context.Context, id string) (store.Session
 	_ = os.Remove(filepath.Join(sessionDir, sandbox.ProxyReadyFile))
 
 	createOpts := sandbox.CreateOptions{
+		PreserveLegacyImage: session.AgentVersion == "",
+		AgentVersion:        session.AgentVersion, ImageDigest: session.ImageDigest, Image: session.Image, ImageRecipe: session.ImageRecipe, GuestArchitecture: session.GuestArchitecture,
 		CPUs:               session.CPUs,
 		MemoryGB:           session.MemoryGB,
 		Name:               session.Name,

@@ -3,11 +3,13 @@ package session
 import (
 	"context"
 	"errors"
+	"github.com/montcao/saint/internal/claudeimage"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/montcao/saint/internal/sandbox"
@@ -183,3 +185,10 @@ func TestStartClearsTheProxyReadySignal(t *testing.T) {
 		t.Errorf("proxy-ready survived a restart (stat err = %v)", err)
 	}
 }
+
+func (r *recordingSandbox) PrepareClaude(context.Context) (claudeimage.Selection, error) {
+	s, err := claudeimage.Select("2.1.3", "arm64", []byte("synthetic recipe"))
+	s.Digest = "sha256:" + strings.Repeat("a", 64)
+	return s, err
+}
+func (r *recordingSandbox) VerifyClaude(context.Context, claudeimage.Selection) error { return nil }

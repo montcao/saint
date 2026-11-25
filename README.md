@@ -32,7 +32,7 @@ herdr plugin action invoke setup --plugin saint
 
 A pane opens and asks one question per step; Enter takes the default, and
 keys pressed before a question appears are ignored. It starts Apple's
-container service if it is stopped, builds the Claude image (a few minutes,
+container service if it is stopped, builds the host-matched Claude image when needed (a few minutes,
 once; nothing needs pressing meanwhile), adds a credential (your Claude plan
 token or an API key), and binds two keys, one for a Claude pane and one for
 Codex. If you already use those keys, it offers the next free ones. saint

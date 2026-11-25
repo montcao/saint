@@ -318,10 +318,44 @@ saint does not accept Claude Code's bypass-permissions screen for you. The first
 time a session starts, Claude Code asks, and accepting it is your statement that
 the microVM, not the agent's prompts, is the boundary.
 
-The images pin exact agent versions, and sessions run with
-`DISABLE_UPDATES=1` so an agent cannot fetch and execute a new version of
-itself inside the sandbox. Update a runtime by bumping the version in
-`images/<runtime>/Dockerfile` and rebuilding; `saint doctor` prints the command.
+Every new Claude session resolves the installed `claude` executable on the
+host's `PATH` and reads its exact stable version. This is the installed CLI,
+not necessarily the version of a host agent that is already running. Saint
+validates the version and builds or reuses a Linux image keyed by that version,
+guest architecture and the SHA-256 identity of the image recipe. Creation
+prints the selected version, cache reuse or build progress, and the guest
+verification result. A first build can take several minutes. `saint doctor
+--build-images` prepares the current host-matched Claude image and the Codex image.
+
+The build context contains only the Dockerfile embedded in the Saint binary;
+the current project cannot replace it. No host executable, repository,
+private Claude configuration, npm configuration, credential or SSH agent enters
+the image. Exact-version installation or Linux compatibility failure stops
+creation with an actionable error; Saint never selects `latest` or another
+Claude version. Cached images are also verified by running the guest executable
+on a temporary internal network without project mounts or provider credentials.
+The session bootstrap checks that exact version again before agent launch.
+
+Session metadata records `agent_version`, `image`, `image_recipe`,
+`image_digest`, `guest_architecture` and the resolved host executable path.
+Session creation and renewal use the verified immutable image digest. Cache
+inspection errors stop creation rather than rebuilding over an existing tag. `saint list` displays
+`claude@VERSION`. Start, attach and credential renewal retain the starting
+version; a new session resolves the host CLI again. Legacy records with no
+version metadata remain unknown and keep their legacy image behavior.
+All sessions run with `DISABLE_UPDATES=1`; Saint does not update the host CLI
+or change global Claude settings. Codex retains its repository-pinned image.
+
+Builds use Apple's existing builder service. Saint does not stop or delete a
+shared builder or clear images used by other sessions. If image verification
+fails during cancellation, its error names the owned verification resource
+that may need inspection; do not prune unrelated containers or networks.
+
+Parity reports distinguish `installed_host_claude_version` from
+`observed_host_agent_version` and `observed_saint_agent_version`. Supply the
+latter two with `-host-agent-version` and `-saint-agent-version` only after
+checking the relevant startup banner or saved session identity. Omitted running
+versions remain `unknown`; matching installed CLIs is not proof of parity.
 
 ### Agents and providers
 
@@ -374,3 +408,20 @@ size:
 | `proxy_log_requests` | `true` for a new install | write per-request records; usage is always written |
 | `proxy_log_max_bytes` | `4194304` | rotate at this size |
 | `proxy_log_keep_files` | `5` | files retained, so at most ~20 MiB |
+
+
+### Disposable version verification
+
+From the checkout, run `go run ./scripts/verify-host-version -live` to create
+two credential-free disposable sessions through the production creation path.
+This explicitly permits building the host-matched image if absent. The tool
+queries each guest executable, retains private synthetic evidence and removes
+only its session containers/networks. It retains the shared image cache and
+builder; no existing panes, configuration or credentials are used. Success
+verifies version matching and image reuse, not model calls or interactive parity.
+
+The image cache and Apple runtime are trusted host state. Before execution,
+saint registers or validates the runtime's local repository@digest reference.
+An external process deleting that reference between inspection and execution
+can still cause a registry lookup; the digest remains fixed. Do not mutate
+active session image references externally.

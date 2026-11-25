@@ -120,6 +120,9 @@ func (l *Loader) Load(ctx context.Context) (Snapshot, error) {
 		}
 
 		runtime := string(session.Runtime)
+		if session.AgentVersion != "" {
+			runtime += "@" + session.AgentVersion
+		}
 		if runtime == "" && ok {
 			runtime = string(info.Runtime)
 		}

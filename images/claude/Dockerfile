@@ -1,13 +1,18 @@
 FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5
 
-RUN apt-get update \
+ARG CLAUDE_VERSION
+
+RUN test -n "$CLAUDE_VERSION" \
+    && apt-get update \
     && apt-get install -y --no-install-recommends tmux \
     && rm -rf /var/lib/apt/lists/* \
     && groupmod -n agent node \
     && usermod -l agent -d /home/agent -m node \
-    && npm install -g @anthropic-ai/claude-code@2.1.247
+    && npm install --userconfig=/dev/null --registry=https://registry.npmjs.org/ -g "@anthropic-ai/claude-code@${CLAUDE_VERSION}" \
+    && test "$(claude --version)" = "${CLAUDE_VERSION} (Claude Code)" \
+    && npm cache clean --force
 
-# The version above is pinned on purpose, so the agent must not replace it at
+# The exact host-matched build argument pins this image, so the agent must not replace it at
 # runtime. DISABLE_UPDATES blocks every update path, not just the background
 # check: an agent that can fetch and execute new code inside its own sandbox is
 # a supply-chain route into the guest, and it silently undoes the pin.

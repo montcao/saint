@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/montcao/saint/internal/claudeimage"
 	"io"
 	"math"
 	"os"
@@ -31,6 +32,7 @@ func execute(ctx context.Context, bin string, args ...string) (string, error) {
 }
 
 type options struct {
+	hostAgentVersion, saintAgentVersion                    string
 	host, saint, target, repo, agent, ready, prefix, herdr string
 	timeout                                                time.Duration
 	runs                                                   int
@@ -43,6 +45,8 @@ func mainRun(args []string, out, errs io.Writer) int {
 	var reportPath, observationsPath, evaluatePath string
 	fs := flag.NewFlagSet("parity", flag.ContinueOnError)
 	fs.SetOutput(errs)
+	fs.StringVar(&o.hostAgentVersion, "host-agent-version", "", "observed version of the already-running host agent; never inferred from installed CLI")
+	fs.StringVar(&o.saintAgentVersion, "saint-agent-version", "", "verified guest version from session metadata/startup observation")
 	fs.StringVar(&o.host, "host-pane", "", "existing idle host agent pane (paired with -saint-pane)")
 	fs.StringVar(&o.saint, "saint-pane", "", "existing idle saint agent pane")
 	fs.StringVar(&o.target, "target-pane", os.Getenv("HERDR_PANE_ID"), "pane beside which to open two test panes")
@@ -107,6 +111,21 @@ func mainRun(args []string, out, errs io.Writer) int {
 	var timings []latencyPair
 	d := driver{run: execute, bin: o.herdr, timeout: o.timeout, prefix: o.prefix, timings: &timings}
 	report := runReport{Version: evidenceVersion, RunID: nonce(), Created: time.Now().UTC(), Agent: o.agent}
+	report.InstalledHostClaudeVersion = "unknown"
+	report.HostAgentVersion, report.SaintAgentVersion = o.hostAgentVersion, o.saintAgentVersion
+	if report.HostAgentVersion == "" {
+		report.HostAgentVersion = "unknown"
+	}
+	if report.SaintAgentVersion == "" {
+		report.SaintAgentVersion = "unknown"
+	}
+	if o.agent == "claude" {
+		if v, _, err := (claudeimage.Manager{}).Installed(ctx); err == nil {
+			report.InstalledHostClaudeVersion = v
+		}
+	}
+	fmt.Fprintf(out, "installed host Claude CLI: %s; observed running host agent: %s; observed guest agent: %s\n", report.InstalledHostClaudeVersion, report.HostAgentVersion, report.SaintAgentVersion)
+
 	for _, bin := range []string{o.herdr, "container"} {
 		bounded, done := context.WithTimeout(ctx, o.timeout)
 		version, err := execute(bounded, bin, "--version")
@@ -168,6 +187,12 @@ func mainRun(args []string, out, errs io.Writer) int {
 }
 
 func validateOptions(o options) error {
+	for _, v := range []string{o.hostAgentVersion, o.saintAgentVersion} {
+		if v != "" && !claudeimage.ValidVersion(v) {
+			return errors.New("observed agent versions must be exact stable numeric versions")
+		}
+	}
+
 	if o.runs < 1 || o.runs > 20 {
 		return errors.New("runs must be between 1 and 20")
 	}
