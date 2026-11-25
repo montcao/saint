@@ -458,6 +458,18 @@ not structured input state or a security boundary against a malicious terminal.
 Operators must still confirm idle state and inspect for model handling. Dedicated shell
 panes with an empty prefix skip agent UI checks and do not establish agent parity.
 
+Wrapped pending input remains a live-verification blocker. In the captured
+synthetic case, herdr 0.9.5 returned the same two ANSI input rows for `visible`
+and `recent-unwrapped`; the latter did not expose a single logical input line.
+The public [read result](https://github.com/herdrdev/herdr/blob/v0.9.5/src/api/schema/panes.rs)
+contains text, not per-row wrap provenance. Do not join
+application-rendered rows by indentation or apparent width: a genuine newline
+can be indistinguishable. The synthetic fixture preserves that layout and
+regression tests require no submission for ambiguous, altered, missing or
+extra input, including extra leading or trailing spaces. Pending command
+comparison removes only the prompt separator and observed style prefix. Host execution, guest execution and preflight remain gated until
+a reliable logical input representation or wrap provenance is available.
+
 Output parsing accepts plain anchored frames or exactly one observed `⎿`
 prefix (two leading spaces, then two spaces or space plus NBSP after the glyph)
 on the begin line, with exactly five decoration spaces on subsequent nonempty

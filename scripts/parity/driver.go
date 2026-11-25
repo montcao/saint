@@ -114,7 +114,7 @@ func inputMatches(text, prompt, want string) bool {
 	if b != a+2 {
 		return false
 	}
-	line := strings.TrimSpace(lines[a+1])
+	line := lines[a+1]
 	// Observed shell prompt color; do not strip styling from input content.
 	const shellColor = "\x1b[0m\x1b[38;2;253;93;177m"
 	coloredShell := prompt == "!" && strings.HasPrefix(line, shellColor)
@@ -124,7 +124,15 @@ func inputMatches(text, prompt, want string) bool {
 	if !strings.HasPrefix(line, prompt) {
 		return false
 	}
-	rest := strings.TrimLeft(strings.TrimPrefix(line, prompt), " \u00a0")
+	rest := strings.TrimPrefix(line, prompt)
+	// Remove exactly the prompt separator, never user-input whitespace.
+	if strings.HasPrefix(rest, " ") {
+		rest = strings.TrimPrefix(rest, " ")
+	} else if strings.HasPrefix(rest, "\u00a0") {
+		rest = strings.TrimPrefix(rest, "\u00a0")
+	} else {
+		return false
+	}
 	if want == "" {
 		if rest == "" {
 			return true
