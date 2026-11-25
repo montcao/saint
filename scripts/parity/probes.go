@@ -46,32 +46,61 @@ var manualProbes = []string{
 	"pane-close conversation resume", "herdr restart conversation resume", "herdr update handoff",
 }
 
-func compareProbes(ctx context.Context, d driver, host, saint string, probes []probe) []result {
+// A preflight is execution evidence, not proof that the model never saw input.
+// Stop at the first failure; do not send anything else to an uncertain pane.
+func preflight(ctx context.Context, d driver, host, saint string) error {
+	for _, side := range []struct{ name, pane string }{{"host", host}, {"saint", saint}} {
+		id := nonce()
+		want := "execution-" + id
+		got, err := d.probe(ctx, side.pane, "printf '%s%s\\n' 'execution-' "+quote(id), id)
+		if err != nil {
+			return fmt.Errorf("%s preflight: %s; remaining submissions stopped", side.name, failureDetail(err))
+		}
+		if got != want {
+			return fmt.Errorf("%s preflight: output mismatch; remaining submissions stopped", side.name)
+		}
+	}
+	return nil
+}
+func unverifiedProbes(probes []probe, detail string) []result {
 	results := make([]result, 0, len(probes))
 	for _, p := range probes {
-		id := nonce()
-		a, ea := d.probe(ctx, host, p.script, id+"h")
-		b, eb := d.probe(ctx, saint, p.script, id+"s")
-		r := result{Name: p.name, Status: "PASS", Detail: "matching successful output"}
-		switch {
-		case ea != nil && eb != nil:
-			r.Status = "FAIL"
-			r.Detail = "both probes failed"
-		case ea != nil:
-			r.Status = "FAIL"
-			r.Detail = "host probe failed"
-		case eb != nil:
-			r.Status = "FAIL"
-			r.Detail = "saint probe failed"
-		case a != b:
-			r.Status = "FAIL"
-			r.Detail = "outputs differ"
-		}
-		// Never print probe output: identity/config data can contain private values.
-		results = append(results, r)
+		results = append(results, result{p.name, "NOT VERIFIED", detail})
 	}
 	return results
 }
+func compareProbes(ctx context.Context, d driver, host, saint string, probes []probe) []result {
+	results := make([]result, 0, len(probes))
+	for i, p := range probes {
+		id := nonce()
+		a, ea := d.probe(ctx, host, p.script, id+"h")
+		if lostExecution(ea) {
+			results = append(results, result{p.name, "FAIL", "host: " + failureDetail(ea) + "; saint: not attempted"})
+			return append(results, unverifiedProbes(probes[i+1:], "stopped after execution failure")...)
+		}
+		b, eb := d.probe(ctx, saint, p.script, id+"s")
+		r := result{Name: p.name, Status: "PASS", Detail: "matching successful output"}
+		if ea != nil || eb != nil {
+			r.Status = "FAIL"
+			parts := []string{}
+			if ea != nil {
+				parts = append(parts, "host: "+failureDetail(ea))
+			}
+			if eb != nil {
+				parts = append(parts, "saint: "+failureDetail(eb))
+			}
+			r.Detail = strings.Join(parts, "; ")
+		} else if a != b {
+			r.Status, r.Detail = "FAIL", "outputs differ"
+		}
+		results = append(results, r)
+		if lostExecution(eb) {
+			return append(results, unverifiedProbes(probes[i+1:], "stopped after execution failure")...)
+		}
+	}
+	return results
+}
+
 func passing(results []result) int {
 	n := 0
 	for _, r := range results {

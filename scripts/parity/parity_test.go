@@ -73,13 +73,13 @@ func TestDriverUsesSendKeysWaitAndRead(t *testing.T) {
 			t.Fatal("wrong pane")
 		}
 	}
-	if !reflect.DeepEqual(verbs, []string{"send-text", "send-keys", "wait-output", "read"}) {
+	if !reflect.DeepEqual(verbs, []string{"send-keys", "send-text", "send-keys", "wait-output", "read"}) {
 		t.Fatalf("%v", verbs)
 	}
-	if calls[1][3] != "Enter" {
+	if calls[2][3] != "Enter" {
 		t.Fatal("probe not submitted")
 	}
-	if !strings.HasPrefix(calls[0][3], "!sh -c ") {
+	if calls[0][3] != "!" || !strings.HasPrefix(calls[1][3], "sh -c ") {
 		t.Fatal("missing shell prefix")
 	}
 }

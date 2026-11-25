@@ -289,17 +289,37 @@ Gotchas:
 Not verified: `working` and `blocked` produced by a real authenticated agent
 through the wrapper.
 
-## Pane parity harness: baseline not recorded
+## Pane parity harness: baseline not accepted
 
 `make parity` drives host and saint panes with herdr send-text, send-keys,
 wait-output and read. Arguments and response envelopes follow herdr 0.9.5.
-The implementation is tested on Linux; no real Mac baseline, parity score,
-startup timing distribution or visual/lifecycle result has been recorded.
+The first [Mac attempt](https://github.com/montcao/saint/issues/35#issuecomment-7162904332)
+on 2026-11-25 used harness commit `5dc0daf` and an older installed plugin
+`d3b2547`. It recorded 14 failed probes and 15 unverified checks: neither pane
+returned complete framed output, so its 0/29 score does not establish failure
+of the underlying features. Host Claude self-updated during the attempt;
+host/guest agent versions also differed. No accepted parity baseline, startup
+timing distribution or visual/lifecycle result has been recorded.
 
 ### Run automated comparisons on a Mac
 
 Use Apple container, herdr, saint's installed plugin and an authenticated
-agent. Target two dedicated idle agent panes in the same repository:
+agent. Record the checkout commit, installed saint plugin revision, and agent versions
+on both sides before and after the run. Align the installed plugin with the
+intended checkout before treating results as that revision's behavior. Record
+version drift rather than silently treating different versions as equivalent.
+Target two dedicated idle agent panes with empty input in the same disposable
+repository. First run only the execution preflight:
+
+```sh
+make parity PARITY_ARGS='-host-pane w1:p2 -saint-pane w1:p3 -preflight-only -report /tmp/parity-preflight.json'
+```
+
+This sends one harmless, uniquely framed printf command per side, host first.
+It stops on the first failed side; no later pane submissions or comparisons
+follow. A passing preflight proves the expected output was returned, not that
+input never reached a model. Inspect the panes locally for unexpected model
+handling before proceeding. Use a fresh report path for the full comparison:
 
 ```sh
 make parity PARITY_ARGS='-host-pane w1:p2 -saint-pane w1:p3 -report /tmp/parity-run.json'
@@ -315,6 +335,9 @@ make parity PARITY_ARGS='-target-pane w1:p1 -repo /path/to/repo -ready "ready pr
 The default is one pair. `-runs` accepts 1–20; **every created pane and saint
 session is retained**, including on failure, for inspection. Five pairs create
 ten panes and five guest sessions; ensure enough memory and disk first.
+Each fresh pair must pass preflight before the next pair is opened. A failed
+preflight stops further creation and writes unverified comparison rows when
+`-report` is supplied. Existing panes also undergo preflight before comparisons.
 Close the dedicated panes and stop/delete their saint sessions when finished.
 The harness never closes unrelated panes or silently restarts herdr.
 
@@ -329,14 +352,22 @@ Choose a ready marker that cannot occur in onboarding or a banner, and inspect
 the panes to confirm it means readiness. Agent execution is not inferred from
 herdr's exit code alone.
 
-The default agent is Claude; choose `-agent codex` for Codex. Commands use
-`!` shell mode, not model prompts. Confirm the pinned agent supports it;
+The default agent is Claude; choose `-agent codex` for Codex. The harness sends
+`!` with send-keys before pasting the command and submitting Enter, rather than
+pasting `!` as part of the command. This input sequence still needs live Mac
+verification; it is not a guarantee of shell-only routing. Confirm the pinned
+agent supports this mode;
 `-shell-prefix=""` is only for dedicated shell panes and does not establish
 agent-input parity. Never target panes with unsent input or active work.
 Ctrl-C cancels outstanding CLI calls; panes already created remain available.
 
 Each automated probe requires uniquely framed output and exit status zero on
-both sides. Echo cannot satisfy completion markers; timeout, missing output,
+both sides. Reports identify the failing side and stage (shell-mode key,
+send-text, Enter submission, wait-output, readback, framing or exit status)
+without retaining pane contents or raw command errors. Transport or framing
+failure stops subsequent submissions and leaves remaining probes NOT VERIFIED;
+a framed nonzero exit is a probe failure and permits the next probe.
+Echo cannot satisfy completion markers; timeout, missing output,
 either-side failure and different output fail. The report contains result
 summaries and startup samples, not raw configuration or identity values.
 The config comparison covers selected non-credential settings, CLAUDE.md and
@@ -379,7 +410,11 @@ the denominator as NOT VERIFIED; an operator-observed pass is labeled as such.
 Files are local operator evidence, not signed attestations. Retain both files
 when sharing a score so the distinction stays reviewable.
 
-Exit status is 0 only when every probe passes, 1 for failure/unverified probes,
-and 2 for invalid input or setup errors. Driving panes is refused on Linux;
+For a full comparison, the harness exit status is 0 only when every probe
+passes, 1 for failure/unverified probes, and 2 for setup or preflight errors.
+With `-preflight-only`, 0 means both execution checks passed; all comparison
+rows remain NOT VERIFIED and offline evaluation still returns 1. The `go run`
+wrapper and make may map these to their own nonzero statuses; record both the
+printed harness status and the outer command status. Driving panes is refused on Linux;
 offline evaluation and unit tests do not establish a Mac baseline. Record the
 first real Mac run and observations here before treating parity as accepted.

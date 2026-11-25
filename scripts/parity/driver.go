@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -20,7 +21,21 @@ type driver struct {
 func (d driver) call(ctx context.Context, args ...string) (string, error) {
 	bounded, cancel := context.WithTimeout(ctx, d.timeout)
 	defer cancel()
-	return d.run(bounded, d.bin, args...)
+	text, err := d.run(bounded, d.bin, args...)
+	if bounded.Err() != nil {
+		return "", bounded.Err()
+	}
+	// A successful process exit can still carry a herdr RPC error. Readback
+	// is plain text and must never be interpreted as a response envelope.
+	if len(args) > 1 && args[1] != "read" {
+		var envelope struct {
+			Error json.RawMessage `json:"error"`
+		}
+		if json.Unmarshal([]byte(text), &envelope) == nil && len(envelope.Error) > 0 && string(envelope.Error) != "null" {
+			return "", errors.New("herdr RPC failed")
+		}
+	}
+	return text, err
 }
 func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
 
@@ -31,20 +46,27 @@ func probeCommand(prefix, script, id string) string {
 	body := "printf '\\n%s%s\\n' 'SAINT_' " + quote("PARITY_"+id+"_BEGIN") + "; ( " + script + " ); _saint_rc=$?; printf '\\n%s%s:%s\\n' 'SAINT_' " + quote("PARITY_"+id+"_END") + " \"$_saint_rc\""
 	return prefix + "sh -c " + quote(body)
 }
+
+// Send the shell-mode trigger as a key event, not part of a bracketed paste.
 func (d driver) probe(ctx context.Context, pane, script, id string) (string, error) {
-	if _, err := d.call(ctx, "pane", "send-text", pane, probeCommand(d.prefix, script, id)); err != nil {
-		return "", err
+	if d.prefix != "" {
+		if _, err := d.call(ctx, "pane", "send-keys", pane, d.prefix); err != nil {
+			return "", commandFailure("shell-mode key", err)
+		}
+	}
+	if _, err := d.call(ctx, "pane", "send-text", pane, probeCommand("", script, id)); err != nil {
+		return "", commandFailure("send-text", err)
 	}
 	if _, err := d.call(ctx, "pane", "send-keys", pane, "Enter"); err != nil {
-		return "", err
+		return "", commandFailure("submit Enter", err)
 	}
 	end := "SAINT_PARITY_" + id + "_END:"
 	if _, err := d.call(ctx, "pane", "wait-output", pane, "--match", end, "--source", "recent-unwrapped", "--lines", "1000", "--timeout", strconv.FormatInt(d.timeout.Milliseconds(), 10)); err != nil {
-		return "", err
+		return "", commandFailure("wait-output", err)
 	}
 	text, err := d.call(ctx, "pane", "read", pane, "--source", "recent-unwrapped", "--lines", "1000", "--format", "text")
 	if err != nil {
-		return "", err
+		return "", commandFailure("read", err)
 	}
 	return extract(text, id)
 }
@@ -57,20 +79,23 @@ func extract(text, id string) (string, error) {
 	for i, line := range lines {
 		if line == begin {
 			if start != -1 {
-				return "", fmt.Errorf("duplicate begin marker")
+				return "", &probeFailure{"framing", "duplicate begin marker"}
 			}
 			start = i + 1
 			continue
 		}
 		if strings.HasPrefix(line, end) && start >= 0 {
 			code, err := strconv.Atoi(strings.TrimPrefix(line, end))
-			if err != nil || code != 0 {
-				return "", fmt.Errorf("probe exit status is not zero")
+			if err != nil || code < 0 || code > 255 {
+				return "", &probeFailure{"framing", "invalid exit status"}
+			}
+			if code != 0 {
+				return "", &probeFailure{"exit", fmt.Sprintf("status %d", code)}
 			}
 			return strings.TrimSuffix(strings.Join(lines[start:i], "\n"), "\n"), nil
 		}
 	}
-	return "", fmt.Errorf("complete probe output not found")
+	return "", &probeFailure{"framing", "complete probe output not found"}
 }
 
 // paneID accepts the documented JSON response envelope, never arbitrary text
@@ -158,4 +183,32 @@ func (d driver) waitReady(ctx context.Context, pane, ready string) error {
 		return fmt.Errorf("pane did not reach the configured ready marker")
 	}
 	return nil
+}
+
+// Only fixed stages/reasons and a validated exit code reach reports. Never
+// include runner errors, argv, or pane output, which may contain private data.
+type probeFailure struct{ stage, reason string }
+
+func (e *probeFailure) Error() string { return e.stage + ": " + e.reason }
+func failureDetail(err error) string {
+	var e *probeFailure
+	if errors.As(err, &e) {
+		return e.Error()
+	}
+	return "unknown probe failure"
+}
+func lostExecution(err error) bool {
+	var e *probeFailure
+	return err != nil && (!errors.As(err, &e) || e.stage != "exit")
+}
+
+func commandFailure(stage string, err error) error {
+	reason := "command failed"
+	if errors.Is(err, context.DeadlineExceeded) {
+		reason = "timed out"
+	}
+	if errors.Is(err, context.Canceled) {
+		reason = "canceled"
+	}
+	return &probeFailure{stage, reason}
 }

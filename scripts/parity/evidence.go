@@ -14,6 +14,7 @@ const evidenceVersion = 1
 const evidenceLimit = 1 << 20
 
 type runReport struct {
+	Preflight string        `json:"preflight,omitempty"`
 	Version   int           `json:"version"`
 	RunID     string        `json:"run_id"`
 	Created   time.Time     `json:"created_utc"`
@@ -184,6 +185,9 @@ func evaluate(reportPath, observationPath string, out io.Writer) error {
 		return err
 	}
 	fmt.Fprintf(out, "Run %s, recorded %s; herdr %s; container %s\n", r.RunID, r.Created.Format(time.RFC3339), r.Herdr, r.Container)
+	if r.Preflight != "" {
+		fmt.Fprintln(out, "Preflight:", r.Preflight)
+	}
 	printResults(out, results)
 	if passing(results) != len(results) {
 		return errIncomplete
