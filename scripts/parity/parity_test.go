@@ -150,7 +150,7 @@ func TestOpenUsesHerdrResponseShapes(t *testing.T) {
 }
 
 func TestDecoratedOutputStrictlyBounded(t *testing.T) {
-	for _, prefix := range []string{"  ⎿  ", "  ⎿  "} {
+	for _, prefix := range []string{"  ⎿  ", "  ⎿  ", "  _ _"} {
 		text := prefix + "SAINT_PARITY_x_BEGIN\n     first\n       second\n\n     SAINT_PARITY_x_END:0\n"
 		got, err := extract(text, "x")
 		if err != nil || got != "first\n  second" {
@@ -166,6 +166,9 @@ func TestDecoratedOutputStrictlyBounded(t *testing.T) {
 		"  ⎿  SAINT_PARITY_x_BEGIN\n     a\n     SAINT_PARITY_x_END:00",
 		"SAINT_PARITY_x_BEGIN\na\nSAINT_PARITY_x_END:0\nSAINT_PARITY_x_END:0",
 		"  ⎿  SAINT_PARITY_x_BEGIN\n     SAINT_PARITY_x_BEGIN\n     SAINT_PARITY_x_END:0",
+		"  _ _  _ _SAINT_PARITY_x_BEGIN\n     a\n     SAINT_PARITY_x_END:0",
+		"  _ _SAINT_PARITY_x_BEGIN\na\n     SAINT_PARITY_x_END:0",
+		"  _ _SAINT_PARITY_x_BEGIN\n     a\n  _ _SAINT_PARITY_x_END:0",
 		"quoted SAINT_PARITY_x_BEGIN\na\nSAINT_PARITY_x_END:0",
 		"  ⎿  SAINT_PARITY_other_BEGIN\n     a\n     SAINT_PARITY_other_END:0",
 	} {

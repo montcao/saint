@@ -458,6 +458,14 @@ not structured input state or a security boundary against a malicious terminal.
 Operators must still confirm idle state and inspect for model handling. Dedicated shell
 panes with an empty prefix skip agent UI checks and do not establish agent parity.
 
+The older guest's demonstrated indexed-color layout has a directory label in
+the upper border, an `__` ordinary prompt and a styled `!_` shell prompt.
+Only that single-row box is accepted: both borders must have equal width,
+the upper label is restricted to a simple display name, and the observed ANSI
+prefixes must match. Typed text is never inferred empty from its spelling;
+the entire pending command, including whitespace, must match exactly. The
+same dim placeholder check applies. Other layouts remain unsupported.
+
 Wrapped pending input is rejected. In the captured
 synthetic case, herdr 0.9.5 returned the same two ANSI input rows for `visible`
 and `recent-unwrapped`; the latter did not expose a single logical input line.
@@ -478,7 +486,8 @@ this is not a minimum-width assumption. Exact styled input checks must still
 pass on each pane before Enter, and wrapping is never joined heuristically.
 
 Output parsing accepts plain anchored frames or exactly one observed `⎿`
-prefix (two leading spaces, then two spaces or space plus NBSP after the glyph)
+prefix (two leading spaces, then two spaces or space plus NBSP after the glyph),
+or the older guest's exact five-character `  _ _` prefix
 on the begin line, with exactly five decoration spaces on subsequent nonempty
 lines. It preserves payload indentation beyond those five spaces. Duplicate,
 out-of-order, mixed or malformed frames are rejected; arbitrary whitespace

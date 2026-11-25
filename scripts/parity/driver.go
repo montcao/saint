@@ -95,12 +95,58 @@ func (d driver) probe(ctx context.Context, pane, script, id string) (string, err
 	return output, nil
 }
 
+const guestBorderStyle = "\x1b[0m\x1b[38;5;7m"
+
+var guestTopBorder = regexp.MustCompile(`^─{8,} [A-Za-z0-9_.-]+ ─$`)
+
+// guestInput accepts only the demonstrated indexed-color single-row box.
+// The directory label is display-only and never used as an input delimiter.
+func guestInput(lines []string, prompt, want string) bool {
+	for i := len(lines) - 1; i >= 2; i-- {
+		bottom := strings.TrimSuffix(strings.TrimPrefix(lines[i], guestBorderStyle), "\x1b[0m")
+		if lines[i] != guestBorderStyle+bottom+"\x1b[0m" || len([]rune(bottom)) < 8 || strings.Trim(bottom, "─") != "" {
+			continue
+		}
+		top := strings.TrimSuffix(strings.TrimPrefix(lines[i-2], guestBorderStyle), "\x1b[0m")
+		if lines[i-2] != guestBorderStyle+top+"\x1b[0m" || !guestTopBorder.MatchString(top) || len([]rune(top)) != len([]rune(bottom)) {
+			return false
+		}
+		row := lines[i-1]
+		if prompt == "❯" && strings.HasPrefix(row, "__") {
+			rest := strings.TrimPrefix(row, "__")
+			return want == "" && (rest == "" || dimPlaceholder(rest))
+		}
+		const shellPrefix = "\x1b[0m\x1b[38;5;1m!_"
+		if prompt != "!" || !strings.HasPrefix(row, shellPrefix) {
+			return false
+		}
+		rest := strings.TrimPrefix(row, shellPrefix)
+		if want == "" {
+			return rest == "\x1b[0m" || dimPlaceholder(rest)
+		}
+		return strings.HasPrefix(rest, "\x1b[0m") && strings.TrimPrefix(rest, "\x1b[0m") == want
+	}
+	return false
+}
+
+func dimPlaceholder(rest string) bool {
+	const start, end = "\x1b[0m\x1b[2mTry \"", "\"\x1b[0m"
+	if !strings.HasPrefix(rest, start) || !strings.HasSuffix(rest, end) {
+		return false
+	}
+	label := strings.TrimSuffix(strings.TrimPrefix(rest, start), end)
+	return label != "" && !strings.ContainsRune(label, '"') && strings.IndexFunc(label, unicode.IsControl) < 0
+}
+
 var inputSGR = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 // inputMatches accepts only the observed bounded input box. Unknown layouts
 // fail closed; a shell-mode hint elsewhere in history is never readiness.
 func inputMatches(text, prompt, want string) bool {
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	if guestInput(lines, prompt, want) {
+		return true
+	}
 	var borders []int
 	for i, line := range lines {
 		v := strings.TrimSpace(inputSGR.ReplaceAllString(line, ""))
@@ -140,12 +186,7 @@ func inputMatches(text, prompt, want string) bool {
 		}
 		// Only the observed placeholder has this exact style.
 		// Never infer emptiness from its words in plain text or other styling.
-		const start, end = "\x1b[0m\x1b[2mTry \"", "\"\x1b[0m"
-		if (prompt != "❯" && !coloredShell) || !strings.HasPrefix(rest, start) || !strings.HasSuffix(rest, end) {
-			return false
-		}
-		label := strings.TrimSuffix(strings.TrimPrefix(rest, start), end)
-		return label != "" && !strings.ContainsRune(label, '"') && strings.IndexFunc(label, unicode.IsControl) < 0
+		return (prompt == "❯" || coloredShell) && dimPlaceholder(rest)
 	}
 	if coloredShell {
 		rest = strings.TrimPrefix(rest, "\x1b[0m")
@@ -183,12 +224,12 @@ func extract(text, id string) (string, error) {
 	code := -1
 	for i, raw := range lines {
 		line := raw
-		isDecorated := strings.HasPrefix(raw, "  ⎿  ") || strings.HasPrefix(raw, "  ⎿  ")
-		if isDecorated {
-			if strings.HasPrefix(raw, "  ⎿  ") {
-				line = strings.TrimPrefix(raw, "  ⎿  ")
-			} else {
-				line = strings.TrimPrefix(raw, "  ⎿  ")
+		isDecorated := false
+		for _, prefix := range []string{"  ⎿  ", "  ⎿  ", "  _ _"} {
+			if strings.HasPrefix(raw, prefix) {
+				line = strings.TrimPrefix(raw, prefix)
+				isDecorated = true
+				break
 			}
 		}
 		if line == begin {
