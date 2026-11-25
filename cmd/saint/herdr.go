@@ -306,6 +306,9 @@ func startAndAttach(ctx context.Context, deps sessionDeps, in *prompter, out io.
 	// network's gateway address exists only while a container is attached
 	// (docs/research/spikes.md). The guest's init waits for the proxy before
 	// starting the agent, so the agent's first request finds a listener.
+	if created.AgentVersion != "" {
+		fmt.Fprintf(out, "saint: session Claude %s (Linux/%s); retained for this session\n", created.AgentVersion, created.GuestArchitecture)
+	}
 	printBilling(out, created)
 	fmt.Fprintln(out, "saint: starting the credential proxy")
 	err = serveSession(ctx, deps, created.ID)

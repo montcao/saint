@@ -59,11 +59,18 @@ type Info struct {
 }
 
 type CreateOptions struct {
-	Resume   bool
-	Prompt   string
-	CPUs     int
-	MemoryGB int
-	Name     string
+	// PreserveLegacyImage is used only when renewing a session created before image identities existed.
+	PreserveLegacyImage bool
+	ImageDigest         string
+	AgentVersion        string
+	Image               string
+	ImageRecipe         string
+	GuestArchitecture   string
+	Resume              bool
+	Prompt              string
+	CPUs                int
+	MemoryGB            int
+	Name                string
 
 	// ProxyToken is the per-session credential the guest presents to the local
 	// proxy in place of a real provider key. It is never the upstream key.

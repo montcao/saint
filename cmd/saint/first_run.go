@@ -10,10 +10,12 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/montcao/saint/internal/claudeimage"
 	"github.com/montcao/saint/internal/doctor"
 	"github.com/montcao/saint/internal/keychain"
 	"github.com/montcao/saint/internal/sandbox"
 	"github.com/montcao/saint/internal/store"
+	"os"
 )
 
 // First run happens in the pane.
@@ -108,6 +110,9 @@ func (f firstRun) ensureCredential(ctx context.Context, rt sandbox.Runtime, in *
 // runtimeImageExists asks the container CLI whether a runtime's image exists.
 func runtimeImageExists(containerPath string) func(context.Context, sandbox.Runtime) bool {
 	return func(ctx context.Context, rt sandbox.Runtime) bool {
+		if rt == sandbox.RuntimeClaude {
+			return true
+		} // exact image prepared at session creation
 		if containerPath == "" {
 			return true // the service check reports a missing runtime
 		}
@@ -119,6 +124,15 @@ func runtimeImageExists(containerPath string) func(context.Context, sandbox.Runt
 // streaming the build so a pane that takes minutes is visibly working.
 func buildRuntimeImage(containerPath string) func(context.Context, sandbox.Runtime, io.Writer) error {
 	return func(ctx context.Context, rt sandbox.Runtime, out io.Writer) error {
+		if rt == sandbox.RuntimeClaude {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			m := claudeimage.Manager{Container: containerPath, LockDir: filepath.Join(store.New(home).Paths().Root, "image-locks"), Progress: out}
+			_, err = m.Prepare(ctx)
+			return err
+		}
 		root := doctor.ResolveRepoRoot(doctor.DefaultRepoRootCandidates()...)
 		if root == "" {
 			return errors.New("cannot find saint's images/ directory beside this binary")

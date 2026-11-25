@@ -14,16 +14,19 @@ const evidenceVersion = 1
 const evidenceLimit = 1 << 20
 
 type runReport struct {
-	Version   int           `json:"version"`
-	RunID     string        `json:"run_id"`
-	Created   time.Time     `json:"created_utc"`
-	Herdr     string        `json:"herdr_version"`
-	Container string        `json:"container_version"`
-	Agent     string        `json:"agent"`
-	Host      string        `json:"host_pane"`
-	Saint     string        `json:"saint_pane"`
-	Results   []result      `json:"results"`
-	Timings   []latencyPair `json:"startup_samples,omitempty"`
+	InstalledHostClaudeVersion string        `json:"installed_host_claude_version,omitempty"`
+	HostAgentVersion           string        `json:"observed_host_agent_version,omitempty"`
+	SaintAgentVersion          string        `json:"observed_saint_agent_version,omitempty"`
+	Version                    int           `json:"version"`
+	RunID                      string        `json:"run_id"`
+	Created                    time.Time     `json:"created_utc"`
+	Herdr                      string        `json:"herdr_version"`
+	Container                  string        `json:"container_version"`
+	Agent                      string        `json:"agent"`
+	Host                       string        `json:"host_pane"`
+	Saint                      string        `json:"saint_pane"`
+	Results                    []result      `json:"results"`
+	Timings                    []latencyPair `json:"startup_samples,omitempty"`
 }
 
 type observation struct {

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/montcao/saint/internal/claudeimage"
 	"github.com/montcao/saint/internal/keychain"
 	"github.com/montcao/saint/internal/sandbox"
 	"github.com/montcao/saint/internal/store"
@@ -102,12 +103,21 @@ func (d *Doctor) Run(ctx context.Context) ([]Result, error) {
 
 	for _, runtime := range RuntimeImageNames {
 		imageName := "saint/" + runtime + ":latest"
+		if runtime == "claude" {
+			m := claudeimage.Manager{Container: d.ContainerPath}
+			selected, _, err := m.Resolve(ctx)
+			if err != nil {
+				results = append(results, Result{Name: "host-matched Claude image", Detail: err.Error(), Fix: "select a supported host Claude CLI and run saint doctor --build-images"})
+				continue
+			}
+			imageName = selected.Image
+		}
 		_, imageErr := run(ctx, d.ContainerPath, "image", "inspect", imageName)
 		results = append(results, Result{
 			Name:   imageName,
 			OK:     imageErr == nil,
 			Detail: "runtime image present",
-			Fix:    fmt.Sprintf("container build -t %s %s", imageName, imageBuildContext(d.RepoRoot, runtime)),
+			Fix:    "saint doctor --build-images",
 		})
 	}
 
@@ -220,6 +230,17 @@ func BuildImages(ctx context.Context, containerPath, repoRoot string) error {
 		return fmt.Errorf("cannot locate the saint checkout containing images/; run saint doctor --build-images from inside it")
 	}
 	for _, runtime := range RuntimeImageNames {
+		if runtime == "claude" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			m := claudeimage.Manager{Container: containerPath, LockDir: filepath.Join(store.New(home).Paths().Root, "image-locks"), Progress: os.Stdout}
+			if _, err := m.Prepare(ctx); err != nil {
+				return err
+			}
+			continue
+		}
 		context := filepath.Join(repoRoot, "images", runtime)
 		cmd := exec.CommandContext(ctx, containerPath, "build", "-t", "saint/"+runtime+":latest", context)
 		var stdout bytes.Buffer

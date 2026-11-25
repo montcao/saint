@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/montcao/saint/internal/claudeimage"
 	"os/exec"
 	"strconv"
 	"strings"
 )
 
 type AppleContainer struct {
+	ClaudeImages  *claudeimage.Manager
 	containerPath string
 	logf          func(string, ...any)
 }
@@ -21,6 +23,21 @@ func NewAppleContainer(containerPath string, logf func(string, ...any)) *AppleCo
 		containerPath: containerPath,
 		logf:          logf,
 	}
+}
+
+// PrepareClaude resolves anew only for a new session, never start/attach.
+func (a *AppleContainer) PrepareClaude(ctx context.Context) (claudeimage.Selection, error) {
+	if a.ClaudeImages == nil {
+		return claudeimage.Selection{}, errors.New("Claude image preparation is not configured")
+	}
+	return a.ClaudeImages.Prepare(ctx)
+}
+
+func (a *AppleContainer) VerifyClaude(ctx context.Context, s claudeimage.Selection) error {
+	if a.ClaudeImages == nil {
+		return errors.New("Claude image preparation is not configured")
+	}
+	return a.ClaudeImages.VerifyRetained(ctx, s)
 }
 
 func (a *AppleContainer) Create(ctx context.Context, name string, rt Runtime, repos []Repo, sessionDir, proxyURL string, opts CreateOptions) error {
@@ -175,7 +192,21 @@ func (a *AppleContainer) Create(ctx context.Context, name string, rt Runtime, re
 		return err
 	}
 
-	args = append(args, "saint/"+string(rt)+":latest", "sh", "-lc", script)
+	image := "saint/" + string(rt) + ":latest"
+	if rt == RuntimeClaude && (!opts.PreserveLegacyImage && a.ClaudeImages != nil || opts.AgentVersion != "") {
+		if !claudeimage.ValidVersion(opts.AgentVersion) || opts.Image == "" {
+			return errors.New("Claude session requires a verified exact-version image")
+		}
+		if !claudeimage.ValidSelection(opts.AgentVersion, opts.GuestArchitecture, opts.ImageRecipe, opts.Image) {
+			return errors.New("Claude image identity does not match the verified selection")
+		}
+		if !claudeimage.ValidDigest(opts.ImageDigest) {
+			return errors.New("Claude image digest is not verified")
+		}
+		image = claudeimage.Reference(opts.Image, opts.ImageDigest)
+		args = append(args, "--platform", "linux/"+opts.GuestArchitecture, "--label", "saint.agent.version="+opts.AgentVersion)
+	}
+	args = append(args, image, "sh", "-lc", script)
 	_, _, err = a.run(ctx, args...)
 	return err
 }
@@ -264,6 +295,18 @@ func (a *AppleContainer) AttachCmd(name string, opts AttachOptions) (*exec.Cmd, 
 	return exec.Command(a.containerPath, args...), nil
 }
 
+// AgentCommandVersion checks retained session identity before a dead agent is rebuilt.
+func AgentCommandVersion(rt Runtime, workdir, version string) (string, error) {
+	command, err := AgentCommand(rt, workdir)
+	if err != nil || version == "" {
+		return command, err
+	}
+	if rt != RuntimeClaude || !claudeimage.ValidVersion(version) {
+		return "", errors.New("invalid retained agent version")
+	}
+	return `[ "$(/usr/local/bin/claude --version 2>/dev/null)" = ` + shellQuote(version+" (Claude Code)") + ` ] || exit 70; ` + command, nil
+}
+
 // AgentCommand is what attach runs when it has to rebuild a dead session.
 func AgentCommand(rt Runtime, workdir string) (string, error) {
 	return runtimeCommand(rt, workdir, CreateOptions{})
@@ -317,6 +360,14 @@ func runtimeBootstrapScript(rt Runtime, workdir string, opts CreateOptions) (str
 	// The tmux server and the agent inherit this script's environment, which
 	// has no locale at all: give them the same UTF-8 one the attach uses.
 	lines := []string{"set -u", "export LANG=" + guestLocale}
+	if rt == RuntimeClaude && opts.AgentVersion != "" {
+		if !claudeimage.ValidVersion(opts.AgentVersion) {
+			return "", errors.New("invalid expected Claude version")
+		}
+		lines = append(lines, `if [ "$(/usr/local/bin/claude --version 2>/dev/null)" != `+shellQuote(opts.AgentVersion+" (Claude Code)")+` ]; then`,
+			"  printf '%s' 'guest Claude version mismatch; rebuild the exact requested image' > /saint/"+BootstrapErrorFile,
+			"  exit 70", "fi")
+	}
 	lines = append(lines, onboardingLines(rt, workdir)...)
 	if opts.ClaudeConfigDir != "" {
 		lines = append(lines, claudeConfigLines(rt)...)

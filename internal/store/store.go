@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/montcao/saint/internal/claudeimage"
 	"github.com/montcao/saint/internal/sandbox"
 )
 
@@ -25,14 +26,21 @@ func ValidSessionID(id string) bool {
 }
 
 type Session struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Repos     []sandbox.Repo  `json:"repos"`
-	Runtime   sandbox.Runtime `json:"runtime"`
-	MemoryGB  int             `json:"memory_gb"`
-	CPUs      int             `json:"cpus"`
-	CreatedAt time.Time       `json:"created_at"`
-	LastRunAt time.Time       `json:"last_run_at"`
+	// Immutable creation-time identity; empty for sessions predating version matching.
+	ImageDigest          string          `json:"image_digest,omitempty"`
+	AgentVersion         string          `json:"agent_version,omitempty"`
+	Image                string          `json:"image,omitempty"`
+	ImageRecipe          string          `json:"image_recipe,omitempty"`
+	GuestArchitecture    string          `json:"guest_architecture,omitempty"`
+	HostClaudeExecutable string          `json:"host_claude_executable,omitempty"`
+	ID                   string          `json:"id"`
+	Name                 string          `json:"name"`
+	Repos                []sandbox.Repo  `json:"repos"`
+	Runtime              sandbox.Runtime `json:"runtime"`
+	MemoryGB             int             `json:"memory_gb"`
+	CPUs                 int             `json:"cpus"`
+	CreatedAt            time.Time       `json:"created_at"`
+	LastRunAt            time.Time       `json:"last_run_at"`
 
 	// SkipPermissions records whether this session's agent runs without its
 	// approval prompts.
@@ -220,6 +228,10 @@ func (s *Store) LoadSessionsWithWarnings() ([]Session, []string, error) {
 	for _, session := range decoded {
 		if !ValidSessionID(session.ID) {
 			warnings = append(warnings, fmt.Sprintf("skipped session with invalid id %s", quoteTruncated(session.ID, 32)))
+			continue
+		}
+		if session.AgentVersion != "" && (session.Runtime != sandbox.RuntimeClaude || !claudeimage.ValidDigest(session.ImageDigest) || !claudeimage.ValidSelection(session.AgentVersion, session.GuestArchitecture, session.ImageRecipe, session.Image)) {
+			warnings = append(warnings, "skipped session with invalid agent image identity")
 			continue
 		}
 		sessions = append(sessions, session)

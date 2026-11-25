@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/montcao/saint/internal/claudeimage"
 	"github.com/montcao/saint/internal/credential"
 	"github.com/montcao/saint/internal/sandbox"
 	"github.com/montcao/saint/internal/store"
@@ -105,6 +106,25 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (store.Session,
 		rt = sandbox.RuntimeClaude
 	}
 
+	var image claudeimage.Selection
+	if rt == sandbox.RuntimeClaude {
+		preparer, ok := s.Sandbox.(interface {
+			PrepareClaude(context.Context) (claudeimage.Selection, error)
+		})
+		if !ok {
+			return store.Session{}, errors.New("sandbox cannot prepare an exact Claude image")
+		}
+		{
+			image, err = preparer.PrepareClaude(ctx)
+			if err != nil {
+				return store.Session{}, err
+			}
+			if !claudeimage.ValidDigest(image.Digest) || !claudeimage.ValidSelection(image.Version, image.Architecture, image.Recipe, image.Image) {
+				return store.Session{}, errors.New("invalid Claude image selection")
+			}
+		}
+	}
+
 	cpus := req.CPUs
 	if cpus <= 0 {
 		cpus = cfg.DefaultCPUs
@@ -136,14 +156,20 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (store.Session,
 	}
 
 	session := store.Session{
-		ID:        id,
-		Name:      name,
-		Repos:     repos,
-		Runtime:   rt,
-		MemoryGB:  memoryGB,
-		CPUs:      cpus,
-		CreatedAt: now,
-		LastRunAt: now,
+		ID:                   id,
+		AgentVersion:         image.Version,
+		ImageDigest:          image.Digest,
+		Image:                image.Image,
+		ImageRecipe:          image.Recipe,
+		GuestArchitecture:    image.Architecture,
+		HostClaudeExecutable: image.HostExecutable,
+		Name:                 name,
+		Repos:                repos,
+		Runtime:              rt,
+		MemoryGB:             memoryGB,
+		CPUs:                 cpus,
+		CreatedAt:            now,
+		LastRunAt:            now,
 
 		SkipPermissions: req.SkipPermissions,
 	}
@@ -213,6 +239,11 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (store.Session,
 
 	createOpts := sandbox.CreateOptions{
 		Resume:             req.Resume,
+		AgentVersion:       session.AgentVersion,
+		ImageDigest:        session.ImageDigest,
+		Image:              session.Image,
+		ImageRecipe:        session.ImageRecipe,
+		GuestArchitecture:  session.GuestArchitecture,
 		Prompt:             req.Prompt,
 		CPUs:               session.CPUs,
 		MemoryGB:           session.MemoryGB,
@@ -324,7 +355,7 @@ func (s *Service) attachOptions(id string) sandbox.AttachOptions {
 		}
 		workdir := session.Repos[0].Path
 		opts := sandbox.AttachOptions{Workdir: workdir}
-		if command, err := sandbox.AgentCommand(session.Runtime, workdir); err == nil {
+		if command, err := sandbox.AgentCommandVersion(session.Runtime, workdir, session.AgentVersion); err == nil {
 			opts.Command = command
 		}
 		return opts
