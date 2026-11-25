@@ -291,7 +291,7 @@ through the wrapper.
 
 ## Pane parity harness: baseline not accepted
 
-`make parity` drives host and saint panes with herdr send-text, send-keys,
+`make parity` drives host and saint panes with herdr pane run, send-keys,
 wait-output and read. Arguments and response envelopes follow herdr 0.9.5.
 The first [Mac attempt](https://github.com/montcao/saint/issues/35#issuecomment-7162904332)
 on 2026-11-25 used harness commit `5dc0daf` and an older installed plugin
@@ -363,7 +363,7 @@ Ctrl-C cancels outstanding CLI calls; panes already created remain available.
 
 Each automated probe requires uniquely framed output and exit status zero on
 both sides. Reports identify the failing side and stage (shell-mode key,
-send-text, Enter submission, wait-output, readback, framing or exit status)
+ordered command submission, wait-output, readback, framing or exit status)
 without retaining pane contents or raw command errors. Transport or framing
 failure stops subsequent submissions and leaves remaining probes NOT VERIFIED;
 a framed nonzero exit is a probe failure and permits the next probe.
@@ -418,3 +418,12 @@ wrapper and make may map these to their own nonzero statuses; record both the
 printed harness status and the outer command status. Driving panes is refused on Linux;
 offline evaluation and unit tests do not establish a Mac baseline. Record the
 first real Mac run and observations here before treating parity as accepted.
+
+The submission path sends the shell-mode trigger as a key event, then uses
+`herdr pane run` for paste-aware text and encoded Enter in one submission.
+`pane send-text` writes raw bytes in herdr 0.9.5; a separate Enter is not an
+application-level submission guarantee. Ordered submission is also not proof
+of shell-only routing. Confirm shell-mode support and empty idle input before
+running the one-pair preflight, then inspect both panes locally. Do not retry
+or send another Enter after a failure: retained input may still be pending.
+The revised submission path still requires a separately authorized live check.

@@ -49,7 +49,7 @@ func TestExtractionRejectsFailuresEchoAndMissingOutput(t *testing.T) {
 		}
 	}
 }
-func TestDriverUsesSendKeysWaitAndRead(t *testing.T) {
+func TestDriverUsesShellKeyAndOrderedSubmission(t *testing.T) {
 	t.Parallel()
 	var calls [][]string
 	d := driver{bin: "herdr", timeout: time.Second, prefix: "!", run: func(ctx context.Context, bin string, args ...string) (string, error) {
@@ -73,11 +73,8 @@ func TestDriverUsesSendKeysWaitAndRead(t *testing.T) {
 			t.Fatal("wrong pane")
 		}
 	}
-	if !reflect.DeepEqual(verbs, []string{"send-keys", "send-text", "send-keys", "wait-output", "read"}) {
+	if !reflect.DeepEqual(verbs, []string{"send-keys", "run", "wait-output", "read"}) {
 		t.Fatalf("%v", verbs)
-	}
-	if calls[2][3] != "Enter" {
-		t.Fatal("probe not submitted")
 	}
 	if calls[0][3] != "!" || !strings.HasPrefix(calls[1][3], "sh -c ") {
 		t.Fatal("missing shell prefix")

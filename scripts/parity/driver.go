@@ -54,11 +54,11 @@ func (d driver) probe(ctx context.Context, pane, script, id string) (string, err
 			return "", commandFailure("shell-mode key", err)
 		}
 	}
-	if _, err := d.call(ctx, "pane", "send-text", pane, probeCommand("", script, id)); err != nil {
-		return "", commandFailure("send-text", err)
-	}
-	if _, err := d.call(ctx, "pane", "send-keys", pane, "Enter"); err != nil {
-		return "", commandFailure("submit Enter", err)
+	// pane run uses the terminal's negotiated paste framing and submits text
+	// and encoded Enter together. send-text writes raw bytes; a subsequent
+	// Enter can be consumed by the agent's paste/input buffering instead.
+	if _, err := d.call(ctx, "pane", "run", pane, probeCommand("", script, id)); err != nil {
+		return "", commandFailure("submit command", err)
 	}
 	end := "SAINT_PARITY_" + id + "_END:"
 	if _, err := d.call(ctx, "pane", "wait-output", pane, "--match", end, "--source", "recent-unwrapped", "--lines", "1000", "--timeout", strconv.FormatInt(d.timeout.Milliseconds(), 10)); err != nil {

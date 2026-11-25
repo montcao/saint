@@ -11,11 +11,13 @@ import (
 	"time"
 )
 
-// Execute actual framed commands in sh while faking only herdr's transport.
+// Execute actual framed commands only at the ordered submission boundary.
+// Raw text admission and key events alone must never execute a command.
 // A real agent's interpretation of key events still requires a Mac test.
 func shellRunner(t *testing.T, failPane string, sent *[]string) runner {
 	t.Helper()
 	outputs := map[string]string{}
+	pending := map[string]string{}
 	return func(ctx context.Context, _ string, args ...string) (string, error) {
 		if args[0] == "--version" {
 			return "fixture", nil
@@ -23,6 +25,20 @@ func shellRunner(t *testing.T, failPane string, sent *[]string) runner {
 		pane := args[2]
 		switch args[1] {
 		case "send-text":
+			pending[pane] += args[3]
+		case "send-keys":
+			// Model raw text still buffered when Enter arrives: transport
+			// acknowledgement alone neither flushes nor executes it.
+			if args[3] == "!" && pending[pane] != "" {
+				return "", errors.New("input is not empty")
+			}
+		case "run":
+			if !strings.HasPrefix(args[3], "sh -c ") {
+				t.Fatal("unexpected command outside synthetic shell fixture")
+			}
+			if pending[pane] != "" {
+				return "", errors.New("input is not empty")
+			}
 			*sent = append(*sent, pane)
 			if pane == failPane {
 				outputs[pane] = "private model prose"
@@ -105,7 +121,7 @@ func TestPreflightFailureSavesUnverifiedReportWithoutComparisons(t *testing.T) {
 	}
 }
 func TestProbeFailureStagesDoNotLeakRunnerErrors(t *testing.T) {
-	stages := []string{"shell-mode key", "send-text", "submit Enter", "wait-output", "read"}
+	stages := []string{"shell-mode key", "submit command", "wait-output", "read"}
 	for failAt, stage := range stages {
 		t.Run(stage, func(t *testing.T) {
 			calls := 0
@@ -176,6 +192,10 @@ func TestFailedFirstPairPreventsFurtherCreation(t *testing.T) {
 	run := func(ctx context.Context, bin string, args ...string) (string, error) {
 		if len(args) > 1 {
 			switch args[1] {
+			case "run":
+				if args[3] == quote("claude") {
+					return "{}", nil
+				}
 			case "split":
 				splits++
 				return `{"result":{"pane":{"pane_id":"host"}}}`, nil
@@ -209,9 +229,65 @@ func TestProbeRejectsRPCErrorAndClassifiesTimeout(t *testing.T) {
 			calls := 0
 			d := driver{timeout: time.Second, run: func(context.Context, string, ...string) (string, error) { calls++; return tc.raw, tc.err }}
 			_, err := d.probe(t.Context(), "host", "true", "fixture")
-			if err == nil || err.Error() != "send-text: "+tc.reason || calls != 1 {
+			if err == nil || err.Error() != "submit command: "+tc.reason || calls != 1 {
 				t.Fatalf("%v calls=%d", err, calls)
 			}
 		})
+	}
+}
+
+func TestRawTextAndEnterDoNotExecuteBufferedCommand(t *testing.T) {
+	var sent []string
+	run := shellRunner(t, "", &sent)
+	for _, args := range [][]string{
+		{"pane", "send-keys", "host", "!"},
+		{"pane", "send-text", "host", probeCommand("", "printf harmless", "fixture")},
+		{"pane", "send-keys", "host", "Enter"},
+	} {
+		if _, err := run(t.Context(), "herdr", args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	output, err := run(t.Context(), "herdr", "pane", "read", "host")
+	if err != nil || output != "" || len(sent) != 0 {
+		t.Fatalf("executed unsubmitted text: %q %v %v", output, err, sent)
+	}
+	// A retry must not silently append to the still-pending input.
+	if _, err := run(t.Context(), "herdr", "pane", "run", "host", probeCommand("", "true", "retry")); err == nil {
+		t.Fatal("accepted pending input")
+	}
+}
+
+func TestAcknowledgedSubmissionWithoutOutputStopsBeforeGuest(t *testing.T) {
+	var submitted []string
+	d := driver{timeout: time.Second, prefix: "!", run: func(_ context.Context, _ string, args ...string) (string, error) {
+		if args[2] != "host" {
+			t.Fatal("touched guest after failed host submission")
+		}
+		switch args[1] {
+		case "run":
+			submitted = append(submitted, args[2])
+		case "wait-output":
+			return "", context.DeadlineExceeded
+		}
+		return "{}", nil
+	}}
+	err := preflight(t.Context(), d, "host", "guest")
+	if err == nil || !strings.Contains(err.Error(), "host preflight: wait-output: timed out") || len(submitted) != 1 {
+		t.Fatalf("%v %v", err, submitted)
+	}
+}
+
+func TestShellKeyFailurePreventsSubmission(t *testing.T) {
+	calls := 0
+	d := driver{timeout: time.Second, prefix: "!", run: func(_ context.Context, _ string, args ...string) (string, error) {
+		calls++
+		if args[1] != "send-keys" || args[3] != "!" {
+			t.Fatal("submitted without shell-mode trigger")
+		}
+		return "", errors.New("unavailable")
+	}}
+	if err := preflight(t.Context(), d, "host", "guest"); err == nil || calls != 1 {
+		t.Fatalf("%v calls=%d", err, calls)
 	}
 }
