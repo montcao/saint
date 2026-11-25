@@ -291,6 +291,13 @@ func (s *Service) RenewCredential(ctx context.Context, id string) (store.Session
 		SkillMounts:        skillMounts,
 		ClaudeTelemetryOff: cfg.ClaudeTelemetryOff,
 	}
+	// The snapshot the session was created with, never a fresh copy (see
+	// guestconfig.go), and only while sharing is still on: turning it off
+	// takes effect at the next renew too.
+	if cfg.ShareClaudeConfig {
+		createOpts.ClaudeConfigDir = s.existingGuestConfig(session.ID)
+		createOpts.GitName, createOpts.GitEmail = s.gitIdentity()
+	}
 	if err := s.Sandbox.Create(ctx, name, session.Runtime, session.Repos, sessionDir, proxyURL, createOpts); err != nil {
 		return store.Session{}, fmt.Errorf("recreate session: %w", err)
 	}

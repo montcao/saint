@@ -113,6 +113,11 @@ type Paths struct {
 	// session the host thinks it is talking to.
 	TokensDir string
 
+	// GuestConfigDir holds each session's read-only snapshot of the user's
+	// Claude Code configuration. Like TokensDir it is a sibling of
+	// SessionsDir: the host writes here, so no guest may write here.
+	GuestConfigDir string
+
 	// ControlSocket is the running proxy's unix socket: panes ask it to listen
 	// on a session's network and answer its questions about hosts through it.
 	ControlSocket string
@@ -145,6 +150,8 @@ func pathsAt(home, root string) Paths {
 		HooksDir:     filepath.Join(root, "hooks"),
 		ProxyLogPath: filepath.Join(root, "proxy.jsonl"),
 		TokensDir:    filepath.Join(root, "tokens"),
+
+		GuestConfigDir: filepath.Join(root, "guest-config"),
 
 		ControlSocket: filepath.Join(root, "proxy.sock"),
 		LockPath:      filepath.Join(root, "state.lock"),

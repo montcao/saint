@@ -56,6 +56,14 @@ type Service struct {
 	// Logf reports non-fatal decisions, such as falling back from subscription
 	// billing to API billing.
 	Logf func(string, ...any)
+
+	// HostClaudeDir is the user's Claude Code configuration directory. Empty
+	// means ~/.claude under the store's home.
+	HostClaudeDir string
+
+	// GitIdentity returns the user's git name and email for the guest's
+	// commits. Nil leaves the guest without one.
+	GitIdentity func() (name, email string)
 }
 
 func (s *Service) now() time.Time {
@@ -168,6 +176,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (store.Session,
 		_ = s.Sandbox.RemoveNetwork(ctx, session.Network)
 		_ = s.Store.RemoveProxyToken(session.ID)
 		_ = os.RemoveAll(sessionDir)
+		_ = os.RemoveAll(filepath.Join(s.Store.Paths().GuestConfigDir, session.ID))
 	}
 
 	auth := s.resolveAuth(ctx, cfg, session.Runtime, req.Credential)
@@ -185,6 +194,23 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (store.Session,
 		}
 	}
 
+	var guestConfig string
+	var gitName, gitEmail string
+	if cfg.ShareClaudeConfig && session.Runtime == sandbox.RuntimeClaude {
+		snap, err := s.snapshotClaudeConfig(session.ID)
+		if err != nil {
+			discard()
+			return store.Session{}, fmt.Errorf("copy claude configuration: %w", err)
+		}
+		guestConfig = snap.Dir
+		if len(snap.Skipped) > 0 && s.Logf != nil {
+			s.Logf("session %s: not copied into the guest: %s", session.ID, strings.Join(snap.Skipped, ", "))
+		}
+	}
+	if cfg.ShareClaudeConfig {
+		gitName, gitEmail = s.gitIdentity()
+	}
+
 	createOpts := sandbox.CreateOptions{
 		Resume:             req.Resume,
 		Prompt:             req.Prompt,
@@ -199,6 +225,9 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (store.Session,
 		SubscriptionToken:  auth.Token,
 		SkillMounts:        skillMounts,
 		ClaudeTelemetryOff: cfg.ClaudeTelemetryOff,
+		ClaudeConfigDir:    guestConfig,
+		GitName:            gitName,
+		GitEmail:           gitEmail,
 	}
 	if err := s.Sandbox.Create(ctx, containerName(session.ID), session.Runtime, session.Repos, sessionDir, proxyURL, createOpts); err != nil {
 		discard()
@@ -264,6 +293,9 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 
 	sessionDir := filepath.Join(s.Store.Paths().SessionsDir, id)
 	if err := os.RemoveAll(sessionDir); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(filepath.Join(s.Store.Paths().GuestConfigDir, id)); err != nil {
 		return err
 	}
 	return networkErr

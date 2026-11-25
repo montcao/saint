@@ -260,6 +260,53 @@ Refused regardless of the mount roots, after resolving symlinks:
 What a session can reach on the network is in
 [Network access](#network-access).
 
+### Your Claude Code setup inside a session
+
+**Off until you turn it on.** A new session starts with none of your Claude Code
+setup and no git identity. To share it with new Claude sessions:
+
+```bash
+saint claude-config on    # share with new sessions
+saint claude-config off   # stop, including when a session renews
+saint claude-config       # say which it is and what is shared
+```
+
+**What turning it on exposes.** The agent can read everything shared. It can
+also send what it reads out through any host its session may reach, the same as
+your own agent on the host could. Turning it on is how you approve that.
+
+`~/.claude` is never mounted, because it also holds every prompt you have typed,
+every transcript and your login state. Instead, when a Claude session is
+created, saint copies a filtered snapshot into `~/.saint/guest-config/<session>`
+and mounts it read-only. The agent sees it as its own `~/.claude`. If
+`CLAUDE_CONFIG_DIR` is set, saint copies from there instead.
+
+Everything is denied unless it is on this list:
+
+| Copied | Not copied |
+|---|---|
+| `CLAUDE.md` | `~/.claude.json`: your account and MCP servers |
+| `settings.json`, reduced to `model`, `outputStyle`, `autoMode`, `tui`, `language`, `alwaysThinkingEnabled`, `cleanupPeriodDays`, `includeCoAuthoredBy`, `spinnerTipsEnabled`, and the `deny` rules of `permissions` | settings keys that hold secrets or run commands: `env`, `apiKeyHelper`, `hooks`, `statusLine`, plugins, every MCP key, and permission `allow` rules (they record approved commands word for word, and a command can carry a token) |
+| `skills/<name>/`, only folders Claude Code would load as a skill (a skill file at their top level) | history, transcripts (`projects/`), credentials, plugins |
+| `agents/`, `commands/`, `output-styles/` | symlinks at any level, including a skill installed as a link to a folder elsewhere (the folder's other files would cross with it), and files that look like credentials (`.env`, `*.pem`, `*.key`, `id_*`) |
+
+- **Sharing a linked skill:** copy its folder into `~/.claude/skills` instead
+  of linking it.
+- **Size limits:** each file is limited to 2 MiB and the snapshot to 32 MiB.
+- **Skipped files:** anything left out is named in saint's log, with the reason.
+- **MCP servers stay off.** Their definitions often carry tokens.
+- **It's a snapshot, not a live view.** A change on the host reaches new
+  sessions only. Renewing a session's credential keeps the copy the session
+  was created with, for the same reason a changed skill blocks renewal: nobody
+  reviewed the new version for that session. Turning sharing off applies at the
+  next renew.
+- **`settings.json` is a copy.** The agent can change its own copy, but the
+  snapshot replaces it each time the session starts, so the host stays the
+  source.
+- **Commits carry your name.** The guest gets your git `user.name` and
+  `user.email`, and nothing else from your git configuration, as
+  `GIT_AUTHOR_*` and `GIT_COMMITTER_*`.
+
 ### Permissions and pinned runtimes
 
 By default the agent edits without asking: the microVM is the boundary, and an
