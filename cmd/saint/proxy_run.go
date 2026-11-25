@@ -88,7 +88,8 @@ func newProxyRuntime(st *store.Store, kc *keychain.Keychain, containerPath strin
 		Forward:      sessionForward(prompter, policy, jr),
 
 		// The pane shows working while the agent waits on the model.
-		OnRequestStart: prompter.Begin,
+		OnRequestStart:  prompter.Begin,
+		OnUpstreamError: func(ev proxy.UpstreamErrorEvent) { jr.record(upstreamErrorRecord(ev, time.Now())) },
 
 		OnUsage: func(ev proxy.UsageEvent) {
 			// This runs on the goroutine copying an agent's response. record

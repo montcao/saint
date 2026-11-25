@@ -36,8 +36,9 @@ const (
 	// journalKindTunnel is forward-proxied traffic. It carries fewer fields on
 	// purpose: a CONNECT has no path, no provider, and no status saint can
 	// honestly report once the connection is hijacked.
-	journalKindTunnel = "tunnel"
-	journalKindUsage  = "usage"
+	journalKindTunnel        = "tunnel"
+	journalKindUsage         = "usage"
+	journalKindUpstreamError = "upstream_error"
 
 	// journalKindEgress is a ruling on a host a session asked to reach
 	// through the forward proxy: allowed or denied, and why (the shipped
@@ -103,8 +104,11 @@ type journalRecord struct {
 	// key or forwarded the guest's own subscription credential.
 	Auth string `json:"auth,omitempty"`
 
-	Status     int   `json:"status,omitempty"`
-	DurationMS int64 `json:"duration_ms,omitempty"`
+	ErrorType  string            `json:"error_type,omitempty"`
+	RetryAfter string            `json:"retry_after,omitempty"`
+	RateLimits map[string]string `json:"rate_limits,omitempty"`
+	Status     int               `json:"status,omitempty"`
+	DurationMS int64             `json:"duration_ms,omitempty"`
 
 	Model   string `json:"model,omitempty"`
 	Stream  bool   `json:"stream,omitempty"`
@@ -654,4 +658,10 @@ func (s *statusRecorder) statusCode() int {
 		return http.StatusOK
 	}
 	return s.status
+}
+
+func upstreamErrorRecord(ev proxy.UpstreamErrorEvent, at time.Time) journalRecord {
+	return journalRecord{Time: at, Kind: journalKindUpstreamError, SessionID: ev.SessionID,
+		Provider: ev.Provider, Status: ev.Status, ErrorType: ev.Type,
+		RetryAfter: ev.RetryAfter, RateLimits: ev.RateLimits}
 }
