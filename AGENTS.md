@@ -43,6 +43,7 @@ Full text: [`docs/operations/workflow.md`](docs/operations/workflow.md).
 - **Stage paths by name.** Never `git add -A`, `git add .` or `git commit -a`.
 - **Conventional commits**, linted by `commitlint.config.mjs`; the body is one paragraph saying why.
 - **Technical content only** in commits, pull requests and comments, and **no attribution**.
+- **Nothing personal, anywhere public**: no paths, emails, names or hostnames, and no description of a contributor's own setup (their settings, skills, plugins, file counts or sizes), even when it is not secret.
 - **Never bare `git stash`.**
 - **Run what you touched and `make check` before claiming it works**, and quote the output.
 - **Force-push only your own branch**, with a full-SHA lease.
