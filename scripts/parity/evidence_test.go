@@ -13,7 +13,7 @@ import (
 )
 
 func fixtureReport() runReport {
-	r := runReport{Version: 1, RunID: "fixture-run", Created: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Herdr: "fixture", Container: "fixture", Agent: "claude", Host: "w:h", Saint: "w:s"}
+	r := runReport{Version: evidenceVersion, RunID: "fixture-run", Created: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Herdr: "fixture", Container: "fixture", Agent: "claude", Host: "w:h", Saint: "w:s"}
 	for _, p := range defaultProbes() {
 		r.Results = append(r.Results, result{p.name, "PASS", "fixture only"})
 	}

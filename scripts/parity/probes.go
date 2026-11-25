@@ -19,7 +19,7 @@ func defaultProbes() []probe {
 	probes := []probe{
 		{"TERM", `test -n "${TERM-}" && printf '%s\n' "$TERM"`},
 		{"COLORTERM", `printf '%s\n' "${COLORTERM-}"`},
-		{"UTF-8 text roundtrip", `printf '%s\n' '界 ─│┌┐└┘'`},
+		{"UTF-8 bytes", "printf '%s' " + quote(utf8Payload) + " | LC_ALL=C od -An -v -tx1"},
 		{"repository path", `pwd -P`},
 		{"git identity", `python3 -c 'import hashlib,subprocess; print(hashlib.sha256(b"\0".join(subprocess.check_output(["git","config","--get",k]).strip() for k in ["user.name","user.email"])).hexdigest())'`},
 		{"Claude safe settings", `python3 -c 'import hashlib,json,pathlib; p=pathlib.Path.home()/".claude/settings.json"; s=json.loads(p.read_text()) if p.exists() else {}; safe={k:s[k] for k in ["model","outputStyle","permissions","enabledPlugins"] if k in s}; print(hashlib.sha256(json.dumps(safe,sort_keys=True).encode()).hexdigest())'`},
@@ -31,7 +31,7 @@ func defaultProbes() []probe {
 		if tool == "ssh" {
 			version = "-V"
 		}
-		probes = append(probes, probe{tool + " executable", fmt.Sprintf("command -v %s >/dev/null && %s %s >/dev/null 2>&1 && printf 'available\\n'", tool, tool, version)})
+		probes = append(probes, probe{tool + " executable", fmt.Sprintf("%s %s >/dev/null 2>&1 && printf 'available\\n'", tool, version)})
 	}
 	return probes
 }
@@ -73,26 +73,33 @@ func compareProbes(ctx context.Context, d driver, host, saint string, probes []p
 	results := make([]result, 0, len(probes))
 	for i, p := range probes {
 		id := nonce()
-		a, ea := d.probe(ctx, host, p.script, id+"h")
+		a := measureSide(ctx, d, host, p, id+"h")
+		ea := a.err
 		if lostExecution(ea) {
 			results = append(results, result{p.name, "FAIL", "host: " + failureDetail(ea) + "; saint: not attempted"})
 			return append(results, unverifiedProbes(probes[i+1:], "stopped after execution failure")...)
 		}
-		b, eb := d.probe(ctx, saint, p.script, id+"s")
+		b := measureSide(ctx, d, saint, p, id+"s")
+		eb := b.err
 		r := result{Name: p.name, Status: "PASS", Detail: "matching successful output"}
-		if ea != nil || eb != nil {
+		if ea != nil || eb != nil || len(a.missing) > 0 || len(b.missing) > 0 || a.invalidBytes || b.invalidBytes {
 			r.Status = "FAIL"
-			parts := []string{}
-			if ea != nil {
-				parts = append(parts, "host: "+failureDetail(ea))
+			if ea == nil && eb == nil && !a.invalidBytes && !b.invalidBytes && executableTool(p.name) == "" {
+				r.Status = "NOT VERIFIED"
 			}
-			if eb != nil {
-				parts = append(parts, "saint: "+failureDetail(eb))
+			var parts []string
+			for _, part := range []string{sideDetail("host", a), sideDetail("saint", b)} {
+				if part != "" {
+					parts = append(parts, part)
+				}
 			}
 			r.Detail = strings.Join(parts, "; ")
-		} else if a != b {
+		} else if p.name == "UTF-8 bytes" {
+			r.Detail = "both sides match expected UTF-8 bytes; rendering unverified"
+		} else if a.output != b.output {
 			r.Status, r.Detail = "FAIL", "outputs differ"
 		}
+
 		results = append(results, r)
 		if lostExecution(eb) {
 			return append(results, unverifiedProbes(probes[i+1:], "stopped after execution failure")...)

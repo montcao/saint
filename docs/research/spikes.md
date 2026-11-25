@@ -301,6 +301,30 @@ of the underlying features. Host Claude self-updated during the attempt;
 host/guest agent versions also differed. No accepted parity baseline, startup
 timing distribution or visual/lifecycle result has been recorded.
 
+### Diagnostic outcome semantics
+
+New reports use schema version 2. Before a dependent probe, each side runs a
+separately framed availability check for a fixed list of required tools. A
+missing required executable is `FAIL`; a metadata comparison blocked by a
+missing interpreter or helper is `NOT VERIFIED`, with the side and tool named.
+The blocked payload is not submitted. Both outcomes remain in the denominator.
+A known-present tool whose version command fails remains an execution failure,
+not a missing-tool result. Malformed availability output stops further input.
+Reports include fixed diagnostic reasons, never command paths or raw settings.
+
+`UTF-8 bytes` sends the fixed synthetic payload through `od` and compares its
+ASCII hexadecimal output against the expected bytes independently on each side.
+Matching corrupted bytes fail. Missing `od` leaves that side unverified; a
+confirmed byte failure on the other side still makes the result fail. This
+measures payload bytes before glyph rendering, not visual width or appearance.
+`UTF-8 rendered width` remains a separate manual observation with null values
+until exercised. No byte result populates visual evidence automatically.
+
+Schema-1 reports remain readable with their original `UTF-8 text roundtrip`
+name and outcomes. They are never renamed, rescored as byte measurements, or
+rewritten by the new diagnostics. These changes require a future authorized
+live run; they do not alter the recorded failing baseline.
+
 ### Run automated comparisons on a Mac
 
 Use Apple container, herdr, saint's installed plugin and an authenticated

@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const evidenceVersion = 1
+const evidenceVersion = 2
 const evidenceLimit = 1 << 20
 
 type runReport struct {
@@ -62,7 +62,7 @@ var procedures = map[string]string{
 }
 
 func templateFor(r runReport) observations {
-	o := observations{Version: evidenceVersion, RunID: r.RunID}
+	o := observations{Version: r.Version, RunID: r.RunID}
 	for _, v := range r.Results {
 		if procedure, ok := procedures[v.Name]; ok && v.Status == "NOT VERIFIED" {
 			o.Checks = append(o.Checks, observation{Name: v.Name, Procedure: procedure})
@@ -110,12 +110,16 @@ func writeNewJSON(path string, v any) error {
 }
 
 func validateReport(r runReport) error {
-	if r.Version != evidenceVersion || r.RunID == "" || r.Created.IsZero() || r.Herdr == "" || r.Container == "" || r.Host == "" || r.Saint == "" || r.Host == r.Saint {
+	if (r.Version != 1 && r.Version != evidenceVersion) || r.RunID == "" || r.Created.IsZero() || r.Herdr == "" || r.Container == "" || r.Host == "" || r.Saint == "" || r.Host == r.Saint {
 		return errors.New("incomplete or unsupported run report")
 	}
 	expected := map[string]bool{}
 	for _, p := range defaultProbes() {
-		expected[p.name] = true
+		name := p.name
+		if r.Version == 1 && name == "UTF-8 bytes" {
+			name = "UTF-8 text roundtrip"
+		}
+		expected[name] = true
 	}
 	for _, name := range manualProbes {
 		expected[name] = true
@@ -139,7 +143,7 @@ func applyObservations(r runReport, o observations) ([]result, error) {
 	if err := validateReport(r); err != nil {
 		return nil, err
 	}
-	if o.Version != evidenceVersion || o.RunID != r.RunID {
+	if o.Version != r.Version || o.RunID != r.RunID {
 		return nil, errors.New("observations must belong to this run ID and schema version")
 	}
 	results := append([]result(nil), r.Results...)
