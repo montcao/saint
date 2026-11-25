@@ -323,6 +323,16 @@ The images pin exact agent versions, and sessions run with
 itself inside the sandbox. Update a runtime by bumping the version in
 `images/<runtime>/Dockerfile` and rebuilding; `saint doctor` prints the command.
 
+### Cleaning up build resources
+
+Apple `container` uses a shared `buildkit` VM for image builds. `saint doctor`
+reports whether it is running and the allocated size of its container
+directory when available. Run `container builder stop` once every build on
+the host has finished. This stops the VM and keeps cached data and images.
+saint cannot establish exclusive ownership: another build may begin using
+the builder even if it was idle before saint started. When removing saint,
+check the builder separately from session microVMs and images.
+
 ### Agents and providers
 
 | Agent | Provider |
