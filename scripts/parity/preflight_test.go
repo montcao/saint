@@ -223,6 +223,7 @@ func TestProbeRejectsRPCErrorAndClassifiesTimeout(t *testing.T) {
 func TestInputChecksFailClosed(t *testing.T) {
 	for _, tc := range []struct{ name, screen string }{
 		{"pending", inputBox("❯", "do something")},
+		{"typed placeholder", inputBox("❯", `Try "do something"`)},
 		{"wrong mode", inputBox("!", "")},
 		{"history hint", "! for shell mode\n"},
 		{"multiline", "────────\n❯ one\ntwo\n────────\n"},

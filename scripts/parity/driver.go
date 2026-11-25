@@ -116,7 +116,7 @@ func inputMatches(text, prompt, want string) bool {
 	}
 	rest := strings.TrimLeft(strings.TrimPrefix(line, prompt), " \u00a0")
 	if want == "" {
-		return rest == "" || (strings.HasPrefix(rest, "Try \"") && strings.HasSuffix(rest, "\""))
+		return rest == ""
 	}
 	return rest == want
 }

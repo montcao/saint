@@ -447,8 +447,10 @@ text, checks the exact pending command, and only then sends Enter. It checks
 return to empty ordinary input after extracting output. Each poll is bounded
 by `-timeout` and cancellation. Unknown borders, wrapping, prompt glyphs or
 nonmatching content fail closed, without retrying input. The supported
-single-row box and `Try "..."` placeholder are observations of one host UI,
-not a universal agent protocol or proof of no background work. Operators must
+single-row box is an observation of one host UI, not a universal agent protocol
+or proof of no background work. Placeholder-looking text such as `Try "..."`
+is rejected because text readback cannot distinguish styling from typed input.
+Operators must
 still confirm idle state and inspect for model handling. Dedicated shell
 panes with an empty prefix skip agent UI checks and do not establish agent parity.
 
