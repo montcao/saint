@@ -181,7 +181,7 @@ func inputMatches(text, prompt, want string) bool {
 		return false
 	}
 	if want == "" {
-		if rest == "" {
+		if rest == "" || (coloredShell && rest == "\x1b[0m") {
 			return true
 		}
 		// Only the observed placeholder has this exact style.

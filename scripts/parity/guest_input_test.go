@@ -60,3 +60,15 @@ func TestGuestUncertainInputSendsNoEvents(t *testing.T) {
 		}
 	}
 }
+
+func TestHostEmptyShellReset(t *testing.T) {
+	const prefix = "\x1b[0m\x1b[38;2;253;93;177m!"
+	if !inputMatches(inputBox(prefix, "\x1b[0m"), "!", "") {
+		t.Fatal("observed empty shell reset rejected")
+	}
+	for _, rest := range []string{"\x1b[0m ", "\x1b[0mtyped", "\x1b[0m\x1b[2m", "\x1b[0m\x1b[0m"} {
+		if inputMatches(inputBox(prefix, rest), "!", "") {
+			t.Fatal("nonempty or unknown shell state accepted")
+		}
+	}
+}
