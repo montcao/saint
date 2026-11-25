@@ -110,8 +110,25 @@ its own title style), this file wins.
   states apart, say so instead of picking one.
 - **Correct yourself.** If an earlier report turns out wrong (a PR already
   merged, a claim that didn't hold), say so plainly.
-- **Keep personal data out**: no absolute home paths, emails or real names in
-  commits, comments or fixtures.
+- **Keep personal data out.** The repository and everything on GitHub about it
+  are public and permanent: GitHub keeps the history of an edited description
+  or comment.
+  - Never include absolute home paths, emails, real names or hostnames in code,
+    fixtures, commits, pull requests, issues or comments.
+  - Never describe a contributor's own machine or setup, even when nothing in
+    it is secret: their settings and their values, skill or plugin names, file
+    counts and sizes, installed tools, or numbers measured from their
+    configuration.
+  - When something was verified against a real machine, say so in general
+    terms ("against a real Claude Code configuration directory: skills copied,
+    settings reduced to the allowlist") and keep the specifics out.
+  - The pre-push hook refuses commits whose added lines or messages contain the
+    pusher's home directory, git email (unless it is a noreply address), or
+    any value they list in their own git config with
+    `git config --add saint.personal <value>`, for example a real email behind
+    a noreply address, or a real name. It is a backstop for the commonest
+    slips, not a substitute for reading what you post, and it cannot see pull
+    request or issue text.
 
 ## Before you claim something works
 

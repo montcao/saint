@@ -5,6 +5,28 @@
 set -eu
 
 zero=0000000000000000000000000000000000000000
+
+# The repository is public. Refuse commits whose added lines or messages
+# contain this machine's home directory, the pusher's git email, or any value
+# listed with `git config --add saint.personal <value>` (a real email behind a
+# noreply address, a real name, a hostname). All are read here, at push time,
+# from the contributor's own machine, so nothing personal is written into the
+# repository to look for it.
+personal_check() {
+	email=$(git config user.email 2>/dev/null || true)
+	{
+		printf '%s\n' "$HOME"
+		case "$email" in *noreply*) ;; *) printf '%s\n' "$email" ;; esac
+		git config --get-all saint.personal 2>/dev/null || true
+	} | while IFS= read -r needle; do
+		[ -n "$needle" ] || continue
+		if { git diff "$1" "$2" | grep '^+' ; git log --format=%B "$1..$2"; } | grep -qiF -- "$needle"; then
+			echo "pre-push: a commit adds your home directory, git email or a saint.personal value; this repository is public." >&2
+			echo "pre-push: find it with: git diff $1 $2 | grep -nF -- '<value>'   and   git log --format=%B $1..$2" >&2
+			exit 1
+		fi
+	done || exit 1
+}
 while read -r local_ref local_sha remote_ref remote_sha; do
 	[ "$local_sha" = "$zero" ] && continue # deleting a branch
 	# Lint what the branch adds on top of main. The old remote head is not a
@@ -15,6 +37,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 	# commit): commitlint rejects an empty range, and there is nothing to lint.
 	if [ -n "$base" ] && [ "$base" != "$local_sha" ] && [ "$remote_sha" != "$local_sha" ]; then
 		make --no-print-directory -s commitlint-range FROM="$base" TO="$local_sha"
+		personal_check "$base" "$local_sha"
 	fi
 done
 
