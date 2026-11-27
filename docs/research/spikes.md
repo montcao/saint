@@ -383,3 +383,27 @@ Exit status is 0 only when every probe passes, 1 for failure/unverified probes,
 and 2 for invalid input or setup errors. Driving panes is refused on Linux;
 offline evaluation and unit tests do not establish a Mac baseline. Record the
 first real Mac run and observations here before treating parity as accepted.
+
+## Native images: Linux Docker measurement
+
+Measured on Linux x86-64 with Docker 29.9.2. The final stage includes
+ca-certificates, curl, git, openssh-client, ripgrep, less, python3 and tmux.
+Tmux remains necessary for sessions created by the current main branch.
+Native agent artifacts use the version and architecture checksums in each
+image's runtime.lock. Node and npm are absent.
+
+| Image | Linux Docker image Size (bytes) | Agent version |
+|---|---:|---|
+| Claude | 467,256,371 | 2.1.247 |
+| Codex | 540,045,528 | 0.149.1 |
+
+Both builds verified the amd64 artifact checksum. Validation used temporary
+Dockerfile copies that mounted the host CA bundle as a build secret for curl,
+because this Linux workspace intercepts TLS; no CA was copied to the final
+image. Non-root shell checks found every listed tool and trusted certificates.
+The SSH server is absent. These are Docker image Size measurements, not
+compressed downloads or Apple snapshots.
+
+Not verified: Apple container compressed download, snapshot size, one idle
+session's storage, arm64 execution, and end-to-end saint new with either
+runtime. No before/after Apple reduction is claimed.

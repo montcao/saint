@@ -318,10 +318,14 @@ saint does not accept Claude Code's bypass-permissions screen for you. The first
 time a session starts, Claude Code asks, and accepting it is your statement that
 the microVM, not the agent's prompts, is the boundary.
 
-The images pin exact agent versions, and sessions run with
+The images install native agents from version and architecture checksums in
+`images/claude/runtime.lock` and `images/codex/runtime.lock`. They retain a
+shell, core utilities, certificates, curl, git, the SSH client, ripgrep, less,
+python3 and tmux for existing sessions. Agents are root-owned and run as the
+unprivileged `agent` user. Sessions run with
 `DISABLE_UPDATES=1` so an agent cannot fetch and execute a new version of
 itself inside the sandbox. Update a runtime by bumping the version in
-`images/<runtime>/Dockerfile` and rebuilding; `saint doctor` prints the command.
+`images/<runtime>/runtime.lock` and rebuilding; `saint doctor` prints the command.
 
 ### Agents and providers
 
