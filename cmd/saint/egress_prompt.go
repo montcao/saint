@@ -98,13 +98,7 @@ type promptState struct {
 	promptOpened time.Time
 	// promptConnected means a prompt is showing this session's questions.
 	promptConnected bool
-	// inFlight counts the session's API requests crossing the proxy now.
-	inFlight int
 }
-
-// reportedWorking is promptState.reported while the pane shows working. A
-// blocked message always starts with "saint:", so the two cannot collide.
-const reportedWorking = "working"
 
 func newEgressPrompter(st *store.Store, logf func(string, ...any)) *egressPrompter {
 	p := &egressPrompter{
@@ -167,43 +161,6 @@ func (p *egressPrompter) Ask(ctx context.Context, sessionID, host string) proxy.
 	}
 }
 
-// Begin is the proxy's OnRequestStart. While a session has an API request
-// crossing the proxy, its pane shows working: saint cannot see inside the
-// agent, but it does know when the agent is waiting on the model. The pane
-// changes only when the count goes from none to some or back, never on a
-// timer, and a question waiting for a person still wins over working.
-func (p *egressPrompter) Begin(sessionID string) func() {
-	session, ok := p.session(sessionID)
-	if !ok || session.Herdr == nil || session.Herdr.PaneID == "" {
-		return func() {}
-	}
-	p.mu.Lock()
-	st := p.stateFor(sessionID)
-	st.pane = *session.Herdr
-	st.agent = agentName(session)
-	st.inFlight++
-	first := st.inFlight == 1
-	p.mu.Unlock()
-	if first {
-		go p.sync(sessionID)
-	}
-
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			p.mu.Lock()
-			if st.inFlight > 0 {
-				st.inFlight--
-			}
-			last := st.inFlight == 0
-			p.mu.Unlock()
-			if last {
-				go p.sync(sessionID)
-			}
-		})
-	}
-}
-
 func agentName(session store.Session) string {
 	if session.Runtime == "" {
 		return string(sandbox.RuntimeClaude)
@@ -221,8 +178,8 @@ func (p *egressPrompter) stateFor(sessionID string) *promptState {
 }
 
 // sync brings the pane in line with the session: blocked while a question
-// waits for a person, working while an API request is in flight, and back to
-// herdr's own reading of the screen otherwise.
+// waits for a person, and back to herdr's own reading of the screen otherwise.
+// saint reports nothing else: herdr already shows working and idle.
 func (p *egressPrompter) sync(sessionID string) {
 	p.syncMu.Lock()
 	defer p.syncMu.Unlock()
@@ -231,16 +188,12 @@ func (p *egressPrompter) sync(sessionID string) {
 
 	p.mu.Lock()
 	st := p.stateFor(sessionID)
-	pane, agent, reported, inFlight := st.pane, st.agent, st.reported, st.inFlight
+	pane, agent, reported := st.pane, st.agent, st.reported
 	p.mu.Unlock()
 	if pane.PaneID == "" {
 		return
 	}
 
-	if len(pending) == 0 && inFlight > 0 {
-		p.showWorking(sessionID, st, pane, agent, reported)
-		return
-	}
 	if len(pending) == 0 {
 		if reported != "" {
 			if err := p.herdr(pane, releaseAgentArgs(pane.PaneID, agent)...); err != nil {
@@ -302,33 +255,6 @@ func (p *egressPrompter) sync(sessionID string) {
 		p.mu.Unlock()
 		p.broker.DenyAll(sessionID)
 	}
-}
-
-// showWorking marks the pane working, checking first that it is still the
-// session's when nothing was shown there before.
-func (p *egressPrompter) showWorking(sessionID string, st *promptState, pane store.HerdrPane, agent, reported string) {
-	if reported == reportedWorking {
-		return
-	}
-	if reported == "" && !p.paneIsTheSessions(sessionID, pane) {
-		p.mu.Lock()
-		st.pane = store.HerdrPane{}
-		p.mu.Unlock()
-		return
-	}
-	if err := p.herdr(pane, reportWorkingArgs(pane.PaneID, agent)...); err != nil {
-		p.logf("session=%s herdr report-agent working: %v", sessionID, err)
-		if strings.Contains(err.Error(), "pane_not_found") && p.forget != nil {
-			p.forget(sessionID, pane)
-			p.mu.Lock()
-			st.pane = store.HerdrPane{}
-			p.mu.Unlock()
-		}
-		return
-	}
-	p.mu.Lock()
-	st.reported = reportedWorking
-	p.mu.Unlock()
 }
 
 // paneIsTheSessions checks the recorded pane against herdr. A record that
@@ -471,11 +397,6 @@ func blockedMessage(pending []egress.Question) string {
 func reportBlockedArgs(paneID, agent, message string) []string {
 	return []string{"pane", "report-agent", paneID,
 		"--source", herdrReportSource, "--agent", agent, "--state", "blocked", "--message", message}
-}
-
-func reportWorkingArgs(paneID, agent string) []string {
-	return []string{"pane", "report-agent", paneID,
-		"--source", herdrReportSource, "--agent", agent, "--state", "working"}
 }
 
 func releaseAgentArgs(paneID, agent string) []string {

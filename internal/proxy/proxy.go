@@ -8,7 +8,6 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -93,34 +92,6 @@ type Config struct {
 	// OnUpstreamStatus observes the status received from the provider as soon
 	// as its headers arrive. Callbacks must be safe for concurrent requests.
 	OnUpstreamStatus func(sessionID, provider string, status int)
-
-	// OnRequestStart is called when an attributed request begins crossing the
-	// proxy and returns a function called exactly once when it finishes.
-	//
-	// It exists because "is this session working or idle" has no honest answer
-	// anywhere else. saint does not run the agents it manages and cannot see
-	// inside them, so the only thing it truly knows is whether a request from
-	// that session is crossing this proxy right now. Anything richer would be a
-	// guess wearing the clothes of a measurement.
-	//
-	// Nil is the default and costs nothing. The hook fires only once a request
-	// has been attributed to a session, never for an unauthenticated one: saint
-	// does not know who that was, and charging it to somebody would be an
-	// invented answer about a real person's session.
-	//
-	// The forward-proxy path deliberately does not call it. A CONNECT tunnel
-	// stays open for its whole lifetime - an agent that opened one to a git host
-	// at the start of a task still holds it while it sits waiting for its user -
-	// so counting tunnels would pin that session at "working" until it exits.
-	// That is a false signal and a permanent one, which is worse than the gap it
-	// would fill. Absolute-form plain HTTP on that path is short-lived and would
-	// be honest, but it is the small half of forward traffic, and a count that
-	// means "thinking" for one shape of request and "connected" for another is
-	// a number nobody can read.
-	//
-	// It is called from the goroutine serving the request, so several sessions
-	// can be inside it at once and the implementation must be safe for that.
-	OnRequestStart func(sessionID string) (done func())
 
 	// MaxRequestBytes caps a single request body. Zero takes
 	// DefaultMaxRequestBytes; UnlimitedRequestBytes removes the cap.
@@ -238,14 +209,6 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-
-	// From here the request belongs to a session, so it can be counted as one
-	// in flight. The end is deferred at this single point rather than spelled
-	// out at each of the exits below - an unrouted path, a refused limit, a
-	// keychain that would not open, a panic further down - because a decrement
-	// that does not run leaves that session reading "working" for the rest of
-	// saint's life, and nothing later in the process corrects it.
-	defer p.beginRequest(sessionID)()
 
 	// The session's mode decides how generously an unknown path is treated, so
 	// it has to be known before routing.
@@ -403,57 +366,6 @@ func (p *Proxy) observeResponse(sessionID, provider string) func(*http.Response)
 			},
 		}
 		return nil
-	}
-}
-
-// beginRequest tells the host that an attributed request is now crossing the
-// proxy, and returns the function that says it has finished.
-//
-// The result is never nil, so the call site can be spelled
-// `defer p.beginRequest(id)()` with nothing to check: an unset hook, or one
-// that hands back a nil done, still yields a no-op. It is idempotent too,
-// because the cost of a double call is a counter that drifts below the truth
-// and starts reporting busy sessions as idle.
-//
-// Both halves are panic-contained the way emitUsage is. The hook belongs to
-// another package and runs on the goroutine serving a guest's request, so a
-// panic there must not kill that request - and the recover sits inside the
-// returned function as well as around the hook because a panic must not be
-// allowed to swallow the decrement either.
-func (p *Proxy) beginRequest(sessionID string) func() {
-	if p.cfg.OnRequestStart == nil {
-		return func() {}
-	}
-
-	var done func()
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				if p.cfg.Logf != nil {
-					p.cfg.Logf("session=%s request-start callback panicked: %v", sessionID, r)
-				}
-				// A hook that panicked never returned a done, and calling
-				// whatever it half-assigned would be worse than counting
-				// nothing at all.
-				done = nil
-			}
-		}()
-		done = p.cfg.OnRequestStart(sessionID)
-	}()
-	if done == nil {
-		return func() {}
-	}
-
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			defer func() {
-				if r := recover(); r != nil && p.cfg.Logf != nil {
-					p.cfg.Logf("session=%s request-end callback panicked: %v", sessionID, r)
-				}
-			}()
-			done()
-		})
 	}
 }
 
