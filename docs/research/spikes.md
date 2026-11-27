@@ -301,6 +301,51 @@ of the underlying features. Host Claude self-updated during the attempt;
 host/guest agent versions also differed. No accepted parity baseline, startup
 timing distribution or visual/lifecycle result has been recorded.
 
+### Recorded diagnostic baseline: 2026-11-27
+
+One full schema-2 run at harness commit
+`002eb13e2aa0609180eb9b464a0f6035a0dc3d53` completed before the still-open #34
+launch-path work. It recorded **2 PASS, 8 FAIL, 19 NOT VERIFIED: 2/29 (6.9%)**.
+The harness and `go run` exited 1; `make parity` exited 2. Its framed preflight
+passed, all 14 automated probes completed, and no retry was made to improve
+the score. [The evidence comment](https://github.com/montcao/saint/pull/51#issuecomment-7220749903)
+contains the complete table and sanitized run/observations JSON.
+
+The installed plugin was `d3b25479881383317812c424717e81a446ef21c5`, not the
+harness revision. The session's `saint/claude:latest` image-index digest was
+`sha256:5aef3add19a0b80a4c94b2d151cc1bcf9caf733f55071cdf82cea2e5af0dd61a`.
+Recorded CLI versions were host Claude 2.1.332, guest Claude 2.1.247, herdr
+0.9.5 and Apple container CLI 1.3.0 (d6de569). Running-agent banners were last
+observed on 2026-11-25 at those Claude versions; fresh banners were unavailable.
+Installed CLI measurements must not be read as fresh running-agent observations.
+The existing task-local diagnostic override was preserved. No installation,
+global configuration or launch path was changed for the score.
+
+| Automated measurement | Result |
+|---|---|
+| TERM, COLORTERM | FAIL: outputs differ |
+| UTF-8 bytes | PASS: both sides match the independent expected bytes |
+| Repository path | PASS |
+| Git identity | NOT VERIFIED: guest lacks python3 and git |
+| Claude safe settings, CLAUDE.md, skill names | NOT VERIFIED: guest lacks python3 |
+| git, ssh, curl, less, python3 executables | FAIL: missing guest dependencies |
+| rg executable | FAIL: missing on both tested shell paths |
+
+The four blocked metadata checks establish no configuration mismatch. No
+separate payload-execution failure was recorded. The UTF-8 result says nothing
+about glyph appearance or width; TERM/COLORTERM differences do not establish a
+visual failure. Terminal UI access was unavailable, so all 15 manual checks
+remain null, including visual/keyboard observations. Reusing the pair did not
+measure startup timing or dialogs; no clipboard, authenticated-write, closure,
+restart/update or extra-session checks were performed.
+
+The prior `242a9bd` result remains **1 PASS, 13 FAIL, 15 NOT VERIFIED**. Its
+report was not changed or rescored. This new record is a failing diagnostic
+baseline with explicit coverage limits, not acceptance of full parity. Review
+must decide baseline acceptance for #35 and track the remaining observations;
+100% parity has not been demonstrated. Host-only staging was cleaned, while
+the dedicated pair and guest-side diagnostic artifacts were retained.
+
 ### Diagnostic outcome semantics
 
 New reports use schema version 2. Before a dependent probe, each side runs a
