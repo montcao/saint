@@ -225,7 +225,7 @@ func reattach(ctx context.Context, deps sessionDeps, ref string, out io.Writer) 
 	if err != nil {
 		return err
 	}
-	printBilling(out, found)
+	printCustody(out, found)
 	// Start fails for a session that is already running, which is fine.
 	_ = deps.svc.Start(ctx, found.ID)
 	if err := serveSession(ctx, deps, found.ID); err != nil {
@@ -306,7 +306,7 @@ func startAndAttach(ctx context.Context, deps sessionDeps, in *prompter, out io.
 	// network's gateway address exists only while a container is attached
 	// (docs/research/spikes.md). The guest's init waits for the proxy before
 	// starting the agent, so the agent's first request finds a listener.
-	printBilling(out, created)
+	printCustody(out, created)
 	fmt.Fprintln(out, "saint: starting the credential proxy")
 	err = serveSession(ctx, deps, created.ID)
 	if errors.Is(err, errProxyUnreachable) && deps.firstRun.fixFirewall != nil &&

@@ -71,12 +71,12 @@ description = "sandboxed agent"
 - **Start a session:** press `Ctrl+b`, then `a` (or the key setup printed) in
   a pane inside the project. saint mounts that pane's folder, opens a split
   beside it and starts the agent there. `Ctrl+b`, then `Shift+a` does the same for Codex.
-- **Watch it like any agent:** herdr shows each session as working or idle;
-  saint marks it working whenever the agent is waiting on the model. **Blocked**
-  from saint means one thing: the session wants a host you have not allowed.
-- **Know what it bills:** before the agent starts, the pane says whether the
-  session draws on your Claude plan or bills an API key, and when its
-  credential expires.
+- **Watch it like any agent:** herdr shows each session as working or idle
+  from the pane itself, the way it does for any agent. **Blocked** from saint
+  means one thing: the session wants a host you have not allowed.
+- **Know who holds the credential:** before the agent starts, the pane says
+  whether the guest holds your Claude plan token (and when it expires) or only
+  a per-session token, with the real API key kept in the proxy.
 - **Answer network questions:** a small pane opens below the blocked session,
   without taking your focus. Go to it and press `a` to allow the host for every
   session, or `d` to refuse this request. No answer within 2 minutes refuses.
