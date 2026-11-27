@@ -289,21 +289,143 @@ Gotchas:
 Not verified: `working` and `blocked` produced by a real authenticated agent
 through the wrapper.
 
-## Pane parity harness: baseline not recorded
+## Pane parity harness: baseline not accepted
 
 `make parity` drives host and saint panes with herdr send-text, send-keys,
 wait-output and read. Arguments and response envelopes follow herdr 0.9.5.
-The implementation is tested on Linux; no real Mac baseline, parity score,
-startup timing distribution or visual/lifecycle result has been recorded.
+The first [Mac attempt](https://github.com/montcao/saint/issues/35#issuecomment-7162904332)
+on 2026-11-25 used harness commit `5dc0daf` and an older installed plugin
+`d3b2547`. It recorded 14 failed probes and 15 unverified checks: neither pane
+returned complete framed output, so its 0/29 score does not establish failure
+of the underlying features. Host Claude self-updated during the attempt;
+host/guest agent versions also differed. No accepted parity baseline, startup
+timing distribution or visual/lifecycle result has been recorded.
+
+### Recorded diagnostic baseline: 2026-11-27
+
+One full schema-2 run at harness commit
+`002eb13e2aa0609180eb9b464a0f6035a0dc3d53` completed before the still-open #34
+launch-path work. It recorded **2 PASS, 8 FAIL, 19 NOT VERIFIED: 2/29 (6.9%)**.
+The harness and `go run` exited 1; `make parity` exited 2. Its framed preflight
+passed, all 14 automated probes completed, and no retry was made to improve
+the score. [The evidence comment](https://github.com/montcao/saint/pull/51#issuecomment-7220749903)
+contains the complete table and sanitized run/observations JSON.
+
+The installed plugin was `d3b25479881383317812c424717e81a446ef21c5`, not the
+harness revision. The session's `saint/claude:latest` image-index digest was
+`sha256:5aef3add19a0b80a4c94b2d151cc1bcf9caf733f55071cdf82cea2e5af0dd61a`.
+Recorded CLI versions were host Claude 2.1.332, guest Claude 2.1.247, herdr
+0.9.5 and Apple container CLI 1.3.0 (d6de569). Running-agent banners were last
+observed on 2026-11-25 at those Claude versions; fresh banners were unavailable.
+Installed CLI measurements must not be read as fresh running-agent observations.
+The existing task-local diagnostic override was preserved. No installation,
+global configuration or launch path was changed for the score.
+
+| Automated measurement | Result |
+|---|---|
+| TERM, COLORTERM | FAIL: outputs differ |
+| UTF-8 bytes | PASS: both sides match the independent expected bytes |
+| Repository path | PASS |
+| Git identity | NOT VERIFIED: guest lacks python3 and git |
+| Claude safe settings, CLAUDE.md, skill names | NOT VERIFIED: guest lacks python3 |
+| git, ssh, curl, less, python3 executables | FAIL: missing guest dependencies |
+| rg executable | FAIL: missing on both tested shell paths |
+
+The four blocked metadata checks establish no configuration mismatch. No
+separate payload-execution failure was recorded. The UTF-8 result says nothing
+about glyph appearance or width; TERM/COLORTERM differences do not establish a
+visual failure. Terminal UI access was unavailable, so all 15 manual checks
+remain null, including visual/keyboard observations. Reusing the pair did not
+measure startup timing or dialogs; no clipboard, authenticated-write, closure,
+restart/update or extra-session checks were performed.
+
+The prior `242a9bd` result remains **1 PASS, 13 FAIL, 15 NOT VERIFIED**. Its
+report was not changed or rescored. This new record is a failing diagnostic
+baseline with explicit coverage limits, not acceptance of full parity. Review
+must decide baseline acceptance for #35 and track the remaining observations;
+100% parity has not been demonstrated. Host-only staging was cleaned, while
+the dedicated pair and guest-side diagnostic artifacts were retained.
+
+### Diagnostic outcome semantics
+
+New reports use schema version 2. Before a dependent probe, each side runs a
+separately framed availability check for a fixed list of required tools. A
+missing required executable is `FAIL`; a metadata comparison blocked by a
+missing interpreter or helper is `NOT VERIFIED`, with the side and tool named.
+The blocked payload is not submitted. Both outcomes remain in the denominator.
+A known-present tool whose version command fails remains an execution failure,
+not a missing-tool result. Malformed availability output stops further input.
+Reports include fixed diagnostic reasons, never command paths or raw settings.
+
+`UTF-8 bytes` sends the fixed synthetic payload through `od` and compares its
+ASCII hexadecimal output against the expected bytes independently on each side.
+Matching corrupted bytes fail. Missing `od` leaves that side unverified; a
+confirmed byte failure on the other side still makes the result fail. This
+measures payload bytes before glyph rendering, not visual width or appearance.
+`UTF-8 rendered width` remains a separate manual observation with null values
+until exercised. No byte result populates visual evidence automatically.
+
+Schema-1 reports remain readable with their original `UTF-8 text roundtrip`
+name and outcomes. They are never renamed, rescored as byte measurements, or
+rewritten by the new diagnostics. These changes require a future authorized
+live run; they do not alter the recorded failing baseline.
 
 ### Run automated comparisons on a Mac
 
 Use Apple container, herdr, saint's installed plugin and an authenticated
-agent. Target two dedicated idle agent panes in the same repository:
+agent. Record the checkout commit, installed saint plugin revision, and agent versions
+on both sides before and after the run. Align the installed plugin with the
+intended checkout before treating results as that revision's behavior. Record
+version drift rather than silently treating different versions as equivalent.
+Target two dedicated idle agent panes with empty input in the same disposable
+repository. First run only the execution preflight:
+
+```sh
+make parity PARITY_ARGS='-host-pane w1:p2 -saint-pane w1:p3 -preflight-only -report /tmp/parity-preflight.json'
+```
+
+This sends one harmless, uniquely framed printf command per side, host first.
+It stops on the first failed side; no later pane submissions or comparisons
+follow. A passing preflight proves the expected output was returned, not that
+input never reached a model. Inspect the panes locally for unexpected model
+handling before proceeding. Use a fresh report path for the full comparison:
 
 ```sh
 make parity PARITY_ARGS='-host-pane w1:p2 -saint-pane w1:p3 -report /tmp/parity-run.json'
 ```
+
+Long probes can exceed an agent's single-row input viewport. Use explicit
+staging for an existing dedicated pair instead of widening panes or accepting
+ambiguous wraps. The disposable repository must already be shared at the same
+canonical absolute path in both panes. The harness creates a private guest
+script directory there and a separate host-only directory under the canonical
+`/tmp`. Confirm that host temporary storage is absent from every guest mount;
+nonstandard mounts are the operator's responsibility. Neither directory changes
+agent settings or permissions.
+
+```sh
+make parity PARITY_ARGS='-host-pane w1:p2 -saint-pane w1:p3 -stage-repo /path/to/disposable -staged-demo-only -report /tmp/parity-staged-demo.json'
+```
+
+This sends one short `sh` invocation per side for a generated script exceeding
+4 KiB that prints two framed lines. Inspect both panes for model handling and
+empty ordinary input. After the demonstration succeeds, use the same
+`-stage-repo` without `-staged-demo-only` for one full comparison. Preflight and
+all probes then use separate staged copies. Full exact pending-command checks
+remain mandatory; altered text, genuine newlines and ambiguous wraps still
+stop before Enter. Invocations over 120 bytes fail before any input; use a
+shorter disposable repository path rather than weakening the check.
+
+Scripts contain only generated diagnostic code and unique frame identifiers.
+Host execution never reads the guest-writable copy. Inspection rejects changed
+identity/content, symlinks, nonregular files and unsafe permissions. This does
+not make guest output trustworthy against a malicious guest. Script locations
+are printed locally and must be removed or substituted before publishing logs.
+The harness cleans only unchanged host-only artifacts after confirmed framed
+completion. It retains guest-side artifacts while the guest can rename them,
+and retains both sides if execution is uncertain. After stopping only that
+owned guest and confirming no pending command remains, inspect and remove only
+its recorded diagnostic artifacts; never recursively delete unexpected files.
 
 Or open fresh pane pairs beside a target with an absolute repository path
 and literal text that appears only when the agent is ready:
@@ -315,6 +437,9 @@ make parity PARITY_ARGS='-target-pane w1:p1 -repo /path/to/repo -ready "ready pr
 The default is one pair. `-runs` accepts 1–20; **every created pane and saint
 session is retained**, including on failure, for inspection. Five pairs create
 ten panes and five guest sessions; ensure enough memory and disk first.
+Each fresh pair must pass preflight before the next pair is opened. A failed
+preflight stops further creation and writes unverified comparison rows when
+`-report` is supplied. Existing panes also undergo preflight before comparisons.
 Close the dedicated panes and stop/delete their saint sessions when finished.
 The harness never closes unrelated panes or silently restarts herdr.
 
@@ -329,14 +454,23 @@ Choose a ready marker that cannot occur in onboarding or a banner, and inspect
 the panes to confirm it means readiness. Agent execution is not inferred from
 herdr's exit code alone.
 
-The default agent is Claude; choose `-agent codex` for Codex. Commands use
-`!` shell mode, not model prompts. Confirm the pinned agent supports it;
+The default agent is Claude; choose `-agent codex` for Codex. The harness sends
+`!` with send-keys before pasting the command and submitting Enter, rather than
+pasting `!` as part of the command. This input sequence still needs live Mac
+verification; it is not a guarantee of shell-only routing. Confirm the pinned
+agent supports this mode;
 `-shell-prefix=""` is only for dedicated shell panes and does not establish
 agent-input parity. Never target panes with unsent input or active work.
 Ctrl-C cancels outstanding CLI calls; panes already created remain available.
 
 Each automated probe requires uniquely framed output and exit status zero on
-both sides. Echo cannot satisfy completion markers; timeout, missing output,
+both sides. Reports identify the failing side and stage (shell-mode key,
+idle input, shell input, pending input, command entry/submission, wait-output,
+readback, return to idle, framing or exit status)
+without retaining pane contents or raw command errors. Transport or framing
+failure stops subsequent submissions and leaves remaining probes NOT VERIFIED;
+a framed nonzero exit is a probe failure and permits the next probe.
+Echo cannot satisfy completion markers; timeout, missing output,
 either-side failure and different output fail. The report contains result
 summaries and startup samples, not raw configuration or identity values.
 The config comparison covers selected non-credential settings, CLAUDE.md and
@@ -379,7 +513,94 @@ the denominator as NOT VERIFIED; an operator-observed pass is labeled as such.
 Files are local operator evidence, not signed attestations. Retain both files
 when sharing a score so the distinction stays reviewable.
 
-Exit status is 0 only when every probe passes, 1 for failure/unverified probes,
-and 2 for invalid input or setup errors. Driving panes is refused on Linux;
+For a full comparison, the harness exit status is 0 only when every probe
+passes, 1 for failure/unverified probes, and 2 for setup or preflight errors.
+With `-preflight-only`, 0 means both execution checks passed; all comparison
+rows remain NOT VERIFIED and offline evaluation still returns 1. The `go run`
+wrapper and make may map these to their own nonzero statuses; record both the
+printed harness status and the outer command status. Driving panes is refused on Linux;
 offline evaluation and unit tests do not establish a Mac baseline. Record the
 first real Mac run and observations here before treating parity as accepted.
+
+### Explicit diagnostic configuration and bounded input checks
+
+Claude's shell mode can execute a command directly and then produce a model
+reply. The documented `respondToBashCommands` default is `true`; a reply alone
+does not prove shell-mode entry failed. A host-only stepwise check with Claude
+2.1.332 and this explicit **task-local** `.claude/settings.local.json` override
+executed a harmless printf and returned to empty input without an observed
+reply, including a delayed readback:
+
+```json
+{"respondToBashCommands": false}
+```
+
+This override changes the diagnostic configuration and must be recorded. It
+is not silently installed by the harness; do not edit global settings. Output
+still enters conversation context, and absence of a visible reply is not a
+network audit. Check support and effective behavior on each installed agent;
+the older guest has not been verified. Do not assume a JSON key being present
+means the runtime honors it. See the official [shell-mode documentation](https://code.claude.com/docs/en/interactive-mode)
+and [settings reference](https://code.claude.com/docs/en/settings-reference#respondtobashcommands).
+
+Before each command, the harness polls the **visible ANSI** input box for empty
+ordinary input, sends the shell-mode key, polls for empty shell input, enters
+text, checks the exact pending command, and only then sends Enter. It checks
+return to empty ordinary input after extracting output. Each poll is bounded
+by `-timeout` and cancellation. Unknown borders, wrapping, prompt glyphs or
+nonmatching content fail closed, without retrying input. The supported
+single-row box is an observation of one host UI, not a universal agent protocol
+or proof of no background work. Plain placeholder-looking text such as
+`Try "..."` is rejected. The observed host placeholder is accepted only with
+the exact ANSI reset/dim/reset envelope inside the ordinary input row, or the
+observed pink shell prompt. The same words typed into the host have no dim
+envelope and remain rejected. Unknown styles, mixed typed content and unknown
+prompt colors fail closed. This is a version-specific rendering observation,
+not structured input state or a security boundary against a malicious terminal.
+Operators must still confirm idle state and inspect for model handling. Dedicated shell
+panes with an empty prefix skip agent UI checks and do not establish agent parity.
+
+The older guest's demonstrated indexed-color layout has a directory label in
+the upper border, an `__` ordinary prompt and a styled `!_` shell prompt.
+Only that single-row box is accepted: both borders must have equal width,
+the upper label is restricted to a simple display name, and the observed ANSI
+prefixes must match. Typed text is never inferred empty from its spelling;
+the entire pending command, including whitespace, must match exactly. The
+same dim placeholder check applies. Other layouts remain unsupported.
+
+Wrapped pending input is rejected. In the captured
+synthetic case, herdr 0.9.5 returned the same two ANSI input rows for `visible`
+and `recent-unwrapped`; the latter did not expose a single logical input line.
+The public [read result](https://github.com/herdrdev/herdr/blob/v0.9.5/src/api/schema/panes.rs)
+contains text, not per-row wrap provenance. Do not join
+application-rendered rows by indentation or apparent width: a genuine newline
+can be indistinguishable. The synthetic fixture preserves that layout and
+regression tests require no submission for ambiguous, altered, missing or
+extra input, including extra leading or trailing spaces. Pending command
+comparison removes only the prompt separator and observed style prefix. Longer
+commands remain gated until a reliable logical input representation or
+wrap provenance is available. Diagnostics avoid that ambiguity by passing the
+frame stem once as `sh -c`'s `$0`; each marker is still assembled at execution.
+The payload runs in a subshell and its status is expanded directly into the
+end marker. Preflight derives its expected value from that same unique stem.
+The compact two-line demonstration and preflight fit the observed test width;
+this is not a minimum-width assumption. Exact styled input checks must still
+pass on each pane before Enter, and wrapping is never joined heuristically.
+
+Output parsing accepts plain anchored frames or exactly one observed `⎿`
+prefix (two leading spaces, then two spaces or space plus NBSP after the glyph),
+or the older guest's exact five-character `  _ _` prefix
+on the begin line, with exactly five decoration spaces on subsequent nonempty
+lines. It preserves payload indentation beyond those five spaces. Duplicate,
+out-of-order, mixed or malformed frames are rejected; arbitrary whitespace
+and model prose are not normalized into a pass. This is rendering support,
+not evidence that a model never handled the command.
+
+Next Mac verification: with explicit diagnostic settings, first exercise one
+framed command producing multiple lines on a fresh host and guest, inspecting
+every input step and checking older-guest support rather than assuming it.
+Stop on a model reply or any failure. Only after both sides succeed, run one
+revised preflight; only after that succeeds, run the baseline. Keep unperformed
+manual checks null. Existing retained panes may contain pending text and must
+not be reused without inspection. No guest verification, network audit or
+passing harness result is claimed by the host-only observation or unit tests.

@@ -3,13 +3,17 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type driver struct {
+	stages  *stagedScripts
 	run     runner
 	bin     string
 	timeout time.Duration
@@ -20,7 +24,21 @@ type driver struct {
 func (d driver) call(ctx context.Context, args ...string) (string, error) {
 	bounded, cancel := context.WithTimeout(ctx, d.timeout)
 	defer cancel()
-	return d.run(bounded, d.bin, args...)
+	text, err := d.run(bounded, d.bin, args...)
+	if bounded.Err() != nil {
+		return "", bounded.Err()
+	}
+	// A successful process exit can still carry a herdr RPC error. Readback
+	// is plain text and must never be interpreted as a response envelope.
+	if len(args) > 1 && args[1] != "read" {
+		var envelope struct {
+			Error json.RawMessage `json:"error"`
+		}
+		if json.Unmarshal([]byte(text), &envelope) == nil && len(envelope.Error) > 0 && string(envelope.Error) != "null" {
+			return "", errors.New("herdr RPC failed")
+		}
+	}
+	return text, err
 }
 func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
 
@@ -28,49 +46,269 @@ func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'")
 // Probe output stays between unique markers; an explicit exit code prevents two
 // identical failures from counting as parity.
 func probeCommand(prefix, script, id string) string {
-	body := "printf '\\n%s%s\\n' 'SAINT_' " + quote("PARITY_"+id+"_BEGIN") + "; ( " + script + " ); _saint_rc=$?; printf '\\n%s%s:%s\\n' 'SAINT_' " + quote("PARITY_"+id+"_END") + " \"$_saint_rc\""
-	return prefix + "sh -c " + quote(body)
+	// Reserve $0 for the frame stem so it is quoted and transmitted only once.
+	body := `printf "\n%s_BEGIN\n" "$0";(` + script + `);printf "\n%s_END:%s\n" "$0" "$?"`
+	return prefix + "sh -c " + quote(body) + " " + quote("SAINT_PARITY_"+id)
 }
-func (d driver) probe(ctx context.Context, pane, script, id string) (string, error) {
-	if _, err := d.call(ctx, "pane", "send-text", pane, probeCommand(d.prefix, script, id)); err != nil {
-		return "", err
+
+// Read back each input transition; transport acknowledgement is not readiness.
+func (d driver) probe(ctx context.Context, pane, script, id string) (outputResult string, resultErr error) {
+	command := probeCommand("", script, id)
+	verify := func() error { return nil }
+	if d.stages != nil {
+		var err error
+		command, verify, err = d.stages.prepare(pane, script, id)
+		if err != nil {
+			return "", commandFailure("stage script", err)
+		}
+		defer func() {
+			if lostExecution(resultErr) {
+				d.stages.uncertain = true
+			}
+		}()
+	}
+	if err := verify(); err != nil {
+		return "", commandFailure("verify script", err)
+	}
+	if d.prefix != "" {
+		if err := d.waitInput(ctx, pane, "❯", ""); err != nil {
+			return "", commandFailure("idle input", err)
+		}
+		if _, err := d.call(ctx, "pane", "send-keys", pane, d.prefix); err != nil {
+			return "", commandFailure("shell-mode key", err)
+		}
+		if err := d.waitInput(ctx, pane, "!", ""); err != nil {
+			return "", commandFailure("shell input", err)
+		}
+	}
+	if err := verify(); err != nil {
+		return "", commandFailure("verify script", err)
+	}
+	if _, err := d.call(ctx, "pane", "send-text", pane, command); err != nil {
+		return "", commandFailure("enter command", err)
+	}
+	if d.prefix != "" {
+		if err := d.waitInput(ctx, pane, "!", command); err != nil {
+			return "", commandFailure("pending input", err)
+		}
+	}
+	if err := verify(); err != nil {
+		return "", commandFailure("verify script", err)
 	}
 	if _, err := d.call(ctx, "pane", "send-keys", pane, "Enter"); err != nil {
-		return "", err
+		return "", commandFailure("submit command", err)
 	}
 	end := "SAINT_PARITY_" + id + "_END:"
 	if _, err := d.call(ctx, "pane", "wait-output", pane, "--match", end, "--source", "recent-unwrapped", "--lines", "1000", "--timeout", strconv.FormatInt(d.timeout.Milliseconds(), 10)); err != nil {
-		return "", err
+		return "", commandFailure("wait-output", err)
 	}
 	text, err := d.call(ctx, "pane", "read", pane, "--source", "recent-unwrapped", "--lines", "1000", "--format", "text")
 	if err != nil {
+		return "", commandFailure("read", err)
+	}
+	output, err := extract(text, id)
+	if err != nil {
 		return "", err
 	}
-	return extract(text, id)
-}
-func extract(text, id string) (string, error) {
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	begin := "SAINT_PARITY_" + id + "_BEGIN"
-	end := "SAINT_PARITY_" + id + "_END:"
-	lines := strings.Split(text, "\n")
-	start := -1
-	for i, line := range lines {
-		if line == begin {
-			if start != -1 {
-				return "", fmt.Errorf("duplicate begin marker")
-			}
-			start = i + 1
-			continue
-		}
-		if strings.HasPrefix(line, end) && start >= 0 {
-			code, err := strconv.Atoi(strings.TrimPrefix(line, end))
-			if err != nil || code != 0 {
-				return "", fmt.Errorf("probe exit status is not zero")
-			}
-			return strings.TrimSuffix(strings.Join(lines[start:i], "\n"), "\n"), nil
+	if d.prefix != "" {
+		if err := d.waitInput(ctx, pane, "❯", ""); err != nil {
+			return "", commandFailure("return to idle", err)
 		}
 	}
-	return "", fmt.Errorf("complete probe output not found")
+	return output, nil
+}
+
+const guestBorderStyle = "\x1b[0m\x1b[38;5;7m"
+
+var guestTopBorder = regexp.MustCompile(`^─{8,} [A-Za-z0-9_.-]+ ─$`)
+
+// guestInput accepts only the demonstrated indexed-color single-row box.
+// The directory label is display-only and never used as an input delimiter.
+func guestInput(lines []string, prompt, want string) bool {
+	for i := len(lines) - 1; i >= 2; i-- {
+		bottom := strings.TrimSuffix(strings.TrimPrefix(lines[i], guestBorderStyle), "\x1b[0m")
+		if lines[i] != guestBorderStyle+bottom+"\x1b[0m" || len([]rune(bottom)) < 8 || strings.Trim(bottom, "─") != "" {
+			continue
+		}
+		top := strings.TrimSuffix(strings.TrimPrefix(lines[i-2], guestBorderStyle), "\x1b[0m")
+		if lines[i-2] != guestBorderStyle+top+"\x1b[0m" || !guestTopBorder.MatchString(top) || len([]rune(top)) != len([]rune(bottom)) {
+			return false
+		}
+		row := lines[i-1]
+		if prompt == "❯" && strings.HasPrefix(row, "__") {
+			rest := strings.TrimPrefix(row, "__")
+			return want == "" && (rest == "" || dimPlaceholder(rest))
+		}
+		const shellPrefix = "\x1b[0m\x1b[38;5;1m!_"
+		if prompt != "!" || !strings.HasPrefix(row, shellPrefix) {
+			return false
+		}
+		rest := strings.TrimPrefix(row, shellPrefix)
+		if want == "" {
+			return rest == "\x1b[0m" || dimPlaceholder(rest)
+		}
+		return strings.HasPrefix(rest, "\x1b[0m") && strings.TrimPrefix(rest, "\x1b[0m") == want
+	}
+	return false
+}
+
+func dimPlaceholder(rest string) bool {
+	const start, end = "\x1b[0m\x1b[2mTry \"", "\"\x1b[0m"
+	if !strings.HasPrefix(rest, start) || !strings.HasSuffix(rest, end) {
+		return false
+	}
+	label := strings.TrimSuffix(strings.TrimPrefix(rest, start), end)
+	return label != "" && !strings.ContainsRune(label, '"') && strings.IndexFunc(label, unicode.IsControl) < 0
+}
+
+var inputSGR = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// inputMatches accepts only the observed bounded input box. Unknown layouts
+// fail closed; a shell-mode hint elsewhere in history is never readiness.
+func inputMatches(text, prompt, want string) bool {
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	if guestInput(lines, prompt, want) {
+		return true
+	}
+	var borders []int
+	for i, line := range lines {
+		v := strings.TrimSpace(inputSGR.ReplaceAllString(line, ""))
+		if len([]rune(v)) >= 8 && strings.Trim(v, "─") == "" {
+			borders = append(borders, i)
+		}
+	}
+	if len(borders) < 2 {
+		return false
+	}
+	a, b := borders[len(borders)-2], borders[len(borders)-1]
+	if b != a+2 {
+		return false
+	}
+	line := lines[a+1]
+	// Observed shell prompt color; do not strip styling from input content.
+	const shellColor = "\x1b[0m\x1b[38;2;253;93;177m"
+	coloredShell := prompt == "!" && strings.HasPrefix(line, shellColor)
+	if coloredShell {
+		line = strings.TrimPrefix(line, shellColor)
+	}
+	if !strings.HasPrefix(line, prompt) {
+		return false
+	}
+	rest := strings.TrimPrefix(line, prompt)
+	// Remove exactly the prompt separator, never user-input whitespace.
+	if strings.HasPrefix(rest, " ") {
+		rest = strings.TrimPrefix(rest, " ")
+	} else if strings.HasPrefix(rest, "\u00a0") {
+		rest = strings.TrimPrefix(rest, "\u00a0")
+	} else {
+		return false
+	}
+	if want == "" {
+		if rest == "" || (coloredShell && rest == "\x1b[0m") {
+			return true
+		}
+		// Only the observed placeholder has this exact style.
+		// Never infer emptiness from its words in plain text or other styling.
+		return (prompt == "❯" || coloredShell) && dimPlaceholder(rest)
+	}
+	if coloredShell {
+		rest = strings.TrimPrefix(rest, "\x1b[0m")
+	}
+	return rest == want
+}
+
+func (d driver) waitInput(ctx context.Context, pane, prompt, want string) error {
+	bounded, cancel := context.WithTimeout(ctx, d.timeout)
+	defer cancel()
+	for {
+		text, err := d.call(bounded, "pane", "read", pane, "--source", "visible", "--lines", "1000", "--format", "ansi")
+		if err != nil {
+			return err
+		}
+		if inputMatches(text, prompt, want) {
+			return nil
+		}
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-bounded.Done():
+			timer.Stop()
+			return bounded.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func extract(text, id string) (string, error) {
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	begin, end := "SAINT_PARITY_"+id+"_BEGIN", "SAINT_PARITY_"+id+"_END:"
+	start, finish := -1, -1
+	decorated := false
+	var output []string
+	code := -1
+	for i, raw := range lines {
+		line := raw
+		isDecorated := false
+		for _, prefix := range []string{"  ⎿  ", "  ⎿  ", "  _ _"} {
+			if strings.HasPrefix(raw, prefix) {
+				line = strings.TrimPrefix(raw, prefix)
+				isDecorated = true
+				break
+			}
+		}
+		if line == begin {
+			if start != -1 {
+				return "", &probeFailure{"framing", "duplicate begin marker"}
+			}
+			start, decorated = i, isDecorated
+			continue
+		}
+		if start < 0 {
+			if strings.HasPrefix(strings.TrimPrefix(line, "     "), end) {
+				return "", &probeFailure{"framing", "end before begin"}
+			}
+			continue
+		}
+		if isDecorated {
+			if finish >= 0 && !strings.HasPrefix(line, end) {
+				continue
+			}
+			return "", &probeFailure{"framing", "unexpected decorated line"}
+		}
+		if decorated && !isDecorated && raw != "" {
+			if !strings.HasPrefix(raw, "     ") {
+				if finish < 0 {
+					return "", &probeFailure{"framing", "inconsistent decoration"}
+				}
+			} else {
+				line = strings.TrimPrefix(raw, "     ")
+			}
+		}
+		if line == begin {
+			return "", &probeFailure{"framing", "duplicate begin marker"}
+		}
+		if strings.HasPrefix(line, end) {
+			if finish != -1 {
+				return "", &probeFailure{"framing", "duplicate end marker"}
+			}
+			value := strings.TrimPrefix(line, end)
+			n, err := strconv.Atoi(value)
+			if err != nil || n < 0 || n > 255 || strconv.Itoa(n) != value {
+				return "", &probeFailure{"framing", "invalid exit status"}
+			}
+			finish, code = i, n
+			continue
+		}
+		if finish < 0 {
+			output = append(output, line)
+		}
+	}
+	if start < 0 || finish < 0 {
+		return "", &probeFailure{"framing", "complete probe output not found"}
+	}
+	if code != 0 {
+		return "", &probeFailure{"exit", fmt.Sprintf("status %d", code)}
+	}
+	return strings.TrimSuffix(strings.Join(output, "\n"), "\n"), nil
 }
 
 // paneID accepts the documented JSON response envelope, never arbitrary text
@@ -158,4 +396,32 @@ func (d driver) waitReady(ctx context.Context, pane, ready string) error {
 		return fmt.Errorf("pane did not reach the configured ready marker")
 	}
 	return nil
+}
+
+// Only fixed stages/reasons and a validated exit code reach reports. Never
+// include runner errors, argv, or pane output, which may contain private data.
+type probeFailure struct{ stage, reason string }
+
+func (e *probeFailure) Error() string { return e.stage + ": " + e.reason }
+func failureDetail(err error) string {
+	var e *probeFailure
+	if errors.As(err, &e) {
+		return e.Error()
+	}
+	return "unknown probe failure"
+}
+func lostExecution(err error) bool {
+	var e *probeFailure
+	return err != nil && (!errors.As(err, &e) || e.stage != "exit")
+}
+
+func commandFailure(stage string, err error) error {
+	reason := "command failed"
+	if errors.Is(err, context.DeadlineExceeded) {
+		reason = "timed out"
+	}
+	if errors.Is(err, context.Canceled) {
+		reason = "canceled"
+	}
+	return &probeFailure{stage, reason}
 }
