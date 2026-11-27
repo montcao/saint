@@ -43,9 +43,12 @@ func (a *AppleContainer) Create(ctx context.Context, name string, rt Runtime, re
 		memoryGB = 2
 	}
 
-	args := []string{
-		"run",
-		"--detach",
+	args := []string{"run", "--detach"}
+	if opts.Direct {
+		args = []string{"create", "--tty", "--interactive"}
+		args = append(args, "--env", "TERM="+guestTerm, "--env", "LANG="+guestLocale, "--env", "HOME=/home/agent")
+	}
+	args = append(args,
 
 		// --init puts a real init process at PID 1, with saint's bootstrap
 		// script as its child.
@@ -65,12 +68,12 @@ func (a *AppleContainer) Create(ctx context.Context, name string, rt Runtime, re
 		"--init",
 
 		"--name", name,
-		"--label", "saint.runtime=" + string(rt),
+		"--label", "saint.runtime="+string(rt),
 		"--user", "agent",
 		"--cpus", strconv.Itoa(cpus),
 		"--memory", fmt.Sprintf("%dG", memoryGB),
 		"--workdir", repos[0].Path,
-	}
+	)
 	if opts.Network != "" {
 		if err := ValidateContainerName(opts.Network); err != nil {
 			return fmt.Errorf("create: network: %w", err)
@@ -175,7 +178,11 @@ func (a *AppleContainer) Create(ctx context.Context, name string, rt Runtime, re
 		return err
 	}
 
-	args = append(args, "saint/"+string(rt)+":latest", "sh", "-lc", script)
+	shFlags := "-lc"
+	if opts.Direct {
+		shFlags = "-c"
+	}
+	args = append(args, "saint/"+string(rt)+":latest", "sh", shFlags, script)
 	_, _, err = a.run(ctx, args...)
 	return err
 }
@@ -224,6 +231,12 @@ func (a *AppleContainer) AttachCmd(name string, opts AttachOptions) (*exec.Cmd, 
 	if err := ValidateContainerName(name); err != nil {
 		return nil, fmt.Errorf("attach: %w", err)
 	}
+	if a.containerPath == "" {
+		return nil, fmt.Errorf("attach: %w", ErrNotInstalled)
+	}
+	if opts.DirectContext != nil {
+		return exec.CommandContext(opts.DirectContext, a.containerPath, "start", "--attach", "--interactive", name), nil
+	}
 	// -d detaches any client already attached to the session.
 	//
 	// Detaching a pane kills the host side of the connection but never tells
@@ -257,9 +270,6 @@ func (a *AppleContainer) AttachCmd(name string, opts AttachOptions) (*exec.Cmd, 
 		// Only used when the session had to be recreated; -A ignores it when
 		// the session is already there.
 		args = append(args, opts.Command)
-	}
-	if a.containerPath == "" {
-		return nil, fmt.Errorf("attach: %w", ErrNotInstalled)
 	}
 	return exec.Command(a.containerPath, args...), nil
 }
@@ -300,6 +310,9 @@ const (
 	// The guest can write this file itself, which buys it nothing - it is a
 	// signal about timing, never a permission.
 	ProxyReadyFile = "proxy-ready"
+	// Use a distinct marker so an older running proxy cannot signal a direct
+	// guest before the attached pane has verified reachability.
+	DirectProxyReadyFile = "direct-proxy-ready"
 
 	// proxyReadyWaitTenths bounds that wait, in tenths of a second.
 	proxyReadyWaitTenths = 150
@@ -314,23 +327,49 @@ func runtimeBootstrapScript(rt Runtime, workdir string, opts CreateOptions) (str
 	// and is already gone - which looks exactly like saint failing to create
 	// one. The lines below decide individually whether their own failure is
 	// worth a session. Almost none of them are.
-	// The tmux server and the agent inherit this script's environment, which
-	// has no locale at all: give them the same UTF-8 one the attach uses.
-	lines := []string{"set -u", "export LANG=" + guestLocale}
+	lines := []string{"set -u"}
+	if !opts.Direct {
+		// The tmux server and its agent inherit the bootstrap environment.
+		// Use the same UTF-8 locale as the legacy attach client.
+		lines = append(lines, "export LANG="+guestLocale)
+	}
 	lines = append(lines, onboardingLines(rt, workdir)...)
 	if opts.ClaudeConfigDir != "" {
 		lines = append(lines, claudeConfigLines(rt)...)
 	}
 	if opts.Network != "" {
+		marker, wait := ProxyReadyFile, proxyReadyWaitTenths
+		if opts.Direct {
+			marker, wait = DirectProxyReadyFile, 250
+		}
 		lines = append(lines,
 			"_saint_i=0",
 			fmt.Sprintf(`while [ ! -e /saint/%s ] && [ "$_saint_i" -lt %d ]; do sleep 0.1; _saint_i=$((_saint_i+1)); done`,
-				ProxyReadyFile, proxyReadyWaitTenths),
+				marker, wait),
 		)
+		if opts.Direct {
+			lines = append(lines, fmt.Sprintf(`if [ ! -e /saint/%s ]; then echo 'saint: proxy did not become ready' >&2; exit %d; fi`, marker, bootstrapAgentFailed))
+		}
 	}
 	command, err := runtimeCommand(rt, workdir, opts)
 	if err != nil {
 		return "", err
+	}
+	if opts.Direct {
+		// Claim the first launch even without a prompt. Every later start
+		// continues the conversation saved in the persistent guest home.
+		lines = append(lines,
+			`if (set -C; : > "$HOME/.saint-agent-started") 2>/dev/null; then`,
+			"  exec "+command,
+			"fi",
+		)
+		opts.Prompt = ""
+		opts.Resume = true
+		command, err = runtimeCommand(rt, workdir, opts)
+		if err != nil {
+			return "", err
+		}
+		return strings.Join(append(lines, "exec "+command), "\n"), nil
 	}
 
 	// The agent is the session's own command, not something typed into a shell.

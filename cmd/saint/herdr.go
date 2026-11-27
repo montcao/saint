@@ -226,18 +226,22 @@ func reattach(ctx context.Context, deps sessionDeps, ref string, out io.Writer) 
 		return err
 	}
 	printBilling(out, found)
+	if found.Direct {
+		printDirectLifetime(out)
+		return attachDirect(ctx, deps, found, nil, out)
+	}
 	// Start fails for a session that is already running, which is fine.
 	_ = deps.svc.Start(ctx, found.ID)
 	if err := serveSession(ctx, deps, found.ID); err != nil {
 		return err
 	}
-	return attachHere(deps, found.ID)
+	return attachHere(deps, found.ID, func() error { return execAttach(deps.svc.AttachCmd(found.ID)) })
 }
 
 // attachHere attaches to a session, recording on it the herdr pane this runs
 // in for as long as the attach lasts, so the proxy knows where to ask about a
 // host for it.
-func attachHere(deps sessionDeps, sessionID string) error {
+func attachHere(deps sessionDeps, sessionID string, run func() error) error {
 	var pane *store.HerdrPane
 	if deps.pane != nil {
 		pane = deps.pane()
@@ -256,7 +260,7 @@ func attachHere(deps sessionDeps, sessionID string) error {
 			})
 		}()
 	}
-	return execAttach(deps.svc.AttachCmd(sessionID))
+	return run()
 }
 
 // currentHerdrPane is the herdr pane this process runs in, from the variables
@@ -296,30 +300,15 @@ func startAndAttach(ctx context.Context, deps sessionDeps, in *prompter, out io.
 	if err := deps.firstRun.prepare(ctx, rt, in, out); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "saint: starting a %s microVM on its own network\n", rt)
+	printDirectLifetime(out)
+	fmt.Fprintf(out, "saint: creating a %s microVM on its own network\n", rt)
 	created, err := deps.svc.Create(ctx, req)
 	if err != nil {
 		return err
 	}
 
-	// The proxy listens after the container starts, not before: the
-	// network's gateway address exists only while a container is attached
-	// (docs/research/spikes.md). The guest's init waits for the proxy before
-	// starting the agent, so the agent's first request finds a listener.
 	printBilling(out, created)
-	fmt.Fprintln(out, "saint: starting the credential proxy")
-	err = serveSession(ctx, deps, created.ID)
-	if errors.Is(err, errProxyUnreachable) && deps.firstRun.fixFirewall != nil &&
-		confirm(in, out, "the macOS firewall is blocking saint's proxy. Allow it now? macOS shows a password dialog, once.") {
-		if ferr := deps.firstRun.fixFirewall(ctx, out); ferr != nil {
-			return fmt.Errorf("allow saint through the firewall: %w", ferr)
-		}
-		err = serveSession(ctx, deps, created.ID)
-	}
-	if err != nil {
-		return fmt.Errorf("%w (session %s has no network access; reopen it after fixing this)", err, created.Name)
-	}
-	return attachHere(deps, created.ID)
+	return attachDirect(ctx, deps, created, in, out)
 }
 
 // ensureService makes sure Apple's container service answers, offering to

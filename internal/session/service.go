@@ -146,6 +146,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (store.Session,
 		LastRunAt: now,
 
 		SkipPermissions: req.SkipPermissions,
+		Direct:          true,
 	}
 
 	sessionDir, err := s.Store.EnsureSessionDir(session.ID)
@@ -212,6 +213,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (store.Session,
 	}
 
 	createOpts := sandbox.CreateOptions{
+		Direct:             session.Direct,
 		Resume:             req.Resume,
 		Prompt:             req.Prompt,
 		CPUs:               session.CPUs,
@@ -303,6 +305,22 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 
 func (s *Service) AttachCmd(id string) (*exec.Cmd, error) {
 	return s.Sandbox.AttachCmd(containerName(id), s.attachOptions(id))
+}
+
+func (s *Service) DirectAttachCmd(ctx context.Context, id string) (*exec.Cmd, error) {
+	if !store.ValidSessionID(id) {
+		return nil, fmt.Errorf("invalid session ID %q", id)
+	}
+	// Clear the previous run's marker before the VM starts. A fresh agent
+	// should wait until this pane has checked that the proxy can be reached.
+	ready := filepath.Join(s.Store.Paths().SessionsDir, id, sandbox.DirectProxyReadyFile)
+	if err := os.Remove(ready); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("clear proxy readiness: %w", err)
+	}
+	if err := s.touch(id); err != nil {
+		return nil, err
+	}
+	return s.Sandbox.AttachCmd(containerName(id), sandbox.AttachOptions{DirectContext: ctx})
 }
 
 // attachOptions describe how to rebuild a session whose tmux server has died.

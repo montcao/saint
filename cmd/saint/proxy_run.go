@@ -189,11 +189,35 @@ func listenSession(ctx context.Context, st *store.Store, containerPath string, l
 	if err != nil {
 		return "", err
 	}
-	ready := filepath.Join(st.Paths().SessionsDir, sessionID, sandbox.ProxyReadyFile)
-	if err := os.WriteFile(ready, nil, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("signal the guest: %w", err)
+	// Direct panes signal their guest only after the host confirms that this
+	// listener is reachable. Legacy guests expect the proxy to signal here.
+	if !session.Direct {
+		if err := markProxyReady(st, sessionID, sandbox.ProxyReadyFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
 	}
 	return addr, nil
+}
+
+func markProxyReady(st *store.Store, id, marker string) error {
+	if !store.ValidSessionID(id) {
+		return fmt.Errorf("invalid session ID %q", id)
+	}
+	dir := filepath.Join(st.Paths().SessionsDir, id)
+	// The guest can plant a symlink or FIFO at proxy-ready. Create a new
+	// file and replace the name without ever opening the guest's entry.
+	f, err := os.CreateTemp(dir, ".proxy-ready-*")
+	if err != nil {
+		return fmt.Errorf("signal the guest: %w", err)
+	}
+	defer os.Remove(f.Name())
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("signal the guest: %w", err)
+	}
+	if err := os.Rename(f.Name(), filepath.Join(dir, marker)); err != nil {
+		return fmt.Errorf("signal the guest: %w", err)
+	}
+	return nil
 }
 
 // listenRunningSessions binds the network of every saint session whose
