@@ -370,6 +370,7 @@ func (p *Proxy) serveConnect(w http.ResponseWriter, r *http.Request, sessionID s
 		return
 	}
 
+	p.hostReached(sessionID, tgt.host)
 	client, brw, err := http.NewResponseController(w).Hijack()
 	if err != nil {
 		upstream.Close()
@@ -503,6 +504,7 @@ func (p *Proxy) serveAbsolute(w http.ResponseWriter, r *http.Request, sessionID 
 		return
 	}
 	defer resp.Body.Close()
+	p.hostReached(sessionID, tgt.host)
 
 	removeHopByHop(resp.Header)
 	header := w.Header()

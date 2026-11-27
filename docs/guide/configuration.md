@@ -234,6 +234,20 @@ on or off":
 its intake accepts logs for any Datadog account, so an allowed guest could send
 data to an account of its own.
 
+## Passive proxy summary
+
+Each attachment requests a one-line title in herdr's own pane display: unique
+hosts reached, policy refusals and whether the guest holds a real subscription
+credential or only the proxy placeholder. Counts cover observations since the
+proxy started, independent of request-journal settings. A host counts only
+after a successful connection or upstream response; allowed policy alone does
+not establish reachability. Host tracking is bounded and shows `+` at its cap.
+
+Only changes update metadata. No activity pane opens, no focus changes and no
+redraw timer runs. Network questions still use herdr's `blocked` state when a
+person must act. `saint proxy log --session <session>` provides the full journal
+on demand. Live herdr metadata rendering remains unverified on macOS.
+
 ## Sessions
 
 ### What a session can see

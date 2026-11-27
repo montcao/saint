@@ -29,6 +29,7 @@ type proxyRuntime struct {
 	Control   net.Listener
 	Journal   *journal
 	Prompter  *egressPrompter
+	Summary   *activitySummary
 	// ListenSession makes the proxy listen on a session's network.
 	ListenSession func(ctx context.Context, sessionID string) (string, error)
 }
@@ -77,15 +78,25 @@ func newProxyRuntime(st *store.Store, kc *keychain.Keychain, containerPath strin
 	prompter := newEgressPrompter(st, logf)
 	policy := newLivePolicy(st)
 
+	summary := newActivitySummary(st)
+	forward := sessionForward(prompter, policy, jr)
+	decision := forward.OnDecision
+	forward.OnDecision = func(ev proxy.DecisionEvent) {
+		decision(ev)
+		if ev.Decision == proxy.DecisionDeny {
+			summary.refused(ev.SessionID)
+		}
+	}
 	handler, err := proxy.New(proxy.Config{
-		AnthropicURL: anthropicURL,
-		OpenAIURL:    openAIURL,
-		AnthropicKey: anthropicSource.Get,
-		OpenAIKey:    openAISource.Get,
-		TokenLookup:  tokens.Lookup,
-		SessionAuth:  proxyAuthMode(tokens),
-		Logf:         logger.Printf,
-		Forward:      sessionForward(prompter, policy, jr),
+		AnthropicURL:  anthropicURL,
+		OpenAIURL:     openAIURL,
+		AnthropicKey:  anthropicSource.Get,
+		OpenAIKey:     openAISource.Get,
+		TokenLookup:   tokens.Lookup,
+		SessionAuth:   proxyAuthMode(tokens),
+		Logf:          logger.Printf,
+		Forward:       forward,
+		OnHostReached: summary.reached,
 
 		// The pane shows working while the agent waits on the model.
 		OnRequestStart:  prompter.Begin,
@@ -100,8 +111,11 @@ func newProxyRuntime(st *store.Store, kc *keychain.Keychain, containerPath strin
 	})
 	if err != nil {
 		jr.Close()
+		summary.cancel()
 		return nil, err
 	}
+
+	go summary.loop()
 
 	// Only the request records cost anything on the request path, so the
 	// wrapper exists only when they are wanted.
@@ -116,12 +130,17 @@ func newProxyRuntime(st *store.Store, kc *keychain.Keychain, containerPath strin
 		Listeners: listeners,
 		Journal:   jr,
 		Prompter:  prompter,
+		Summary:   summary,
 	}
 	rt.ListenSession = func(ctx context.Context, sessionID string) (string, error) {
 		// A pane asks right after creating the session, so the cached records
 		// may not have it yet.
 		tokens.invalidate()
-		return listenSession(ctx, st, containerPath, listeners, sessionID)
+		addr, err := listenSession(ctx, st, containerPath, listeners, sessionID)
+		if err == nil {
+			summary.refresh(sessionID)
+		}
+		return addr, err
 	}
 	return rt, nil
 }
@@ -246,6 +265,9 @@ func (r *proxyRuntime) Shutdown(ctx context.Context) error {
 	if r.Journal != nil {
 		r.Journal.Close()
 	}
+	if r.Summary != nil {
+		r.Summary.close()
+	}
 	return errors.Join(errs...)
 }
 
@@ -262,6 +284,7 @@ func runProxy(ctx context.Context, st *store.Store, kc *keychain.Keychain, conta
 	control, err := listenControl(st.Paths().ControlSocket)
 	if err != nil {
 		rt.Journal.Close()
+		rt.Summary.close()
 		return err
 	}
 	rt.Control = control
@@ -269,6 +292,7 @@ func runProxy(ctx context.Context, st *store.Store, kc *keychain.Keychain, conta
 		listeners: rt.Listeners.addrs,
 		listen:    rt.ListenSession,
 		egress:    rt.Prompter.servePrompt,
+		summary:   rt.Summary.refresh,
 	}, rt.Prompter.logf)
 	fmt.Println("control socket", st.Paths().ControlSocket)
 

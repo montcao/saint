@@ -246,6 +246,7 @@ func attachHere(deps sessionDeps, sessionID string) error {
 		if err := deps.svc.Store.UpdateSession(sessionID, func(s *store.Session) { s.Herdr = pane }); err != nil {
 			return err
 		}
+		refreshPaneSummary(deps.svc.Store, sessionID)
 		defer func() {
 			// Only this pane's own record is cleared: another pane may have
 			// attached since and recorded itself.
